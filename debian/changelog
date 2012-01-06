@@ -1,0 +1,13 @@
+xserver-xorg-video-emulfb (1:1.0.0-2) unstable; urgency=low
+
+  * change driver name
+  * Git: slp/pkgs/xorg/driver/xserver-xorg-video-emulfb
+  * Tag: xserver-xorg-video-emulfb_1.0.0-2
+
+ -- Boram Park <boram1288.park@samsung.com>  Thu, 22 Dec 2011 13:47:29 +0900
+
+xserver-xorg-video-emulfb (1:1.0.0-1) unstable; urgency=low
+
+  * Init
+
+ -- Boram Park <boram1288.park@samsung.com>  Wed, 14 Dec 2011 14:41:00 +0900
