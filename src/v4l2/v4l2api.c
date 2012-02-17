@@ -485,13 +485,11 @@ DrawDisplay (void *phandle,
 
 	switch (hdisp->status.format)
 	{
-	case V4L2_VIDEO_FMT_YV12:
-	case V4L2_VIDEO_FMT_YUY2:
-		dst_format = PIXMAN_x8r8g8b8;
+	case V4L2_VIDEO_FMT_I420:
+		dst_format = PIXMAN_x8b8g8r8;
 		break;
 	default:
-		dst_format = PIXMAN_x8b8g8r8;
-		dst_format = PIXMAN_x8b8g8r8;
+		dst_format = PIXMAN_x8r8g8b8;
 		break;
 	}
 
