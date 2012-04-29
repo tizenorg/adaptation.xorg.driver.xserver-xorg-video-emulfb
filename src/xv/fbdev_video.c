@@ -325,11 +325,13 @@ fbdevVideoStop(ScrnInfoPtr pScrnInfo, pointer data, Bool exit)
 		pPortPriv->v4l2_handle = NULL;
 		pFBDev->v4l2_owner[pPortPriv->v4l2_index] = NULL;
 
+#if ENABLE_ARM
 		if (pFBDev->bFbAlphaEnabled)
 		{
 			FBDevScreenAlphaDeinit(fbdevHWGetFD(pScrnInfo));
 			pFBDev->bFbAlphaEnabled = FALSE;
 		}
+#endif
 	}
 	pPortPriv->mode = MODE_INIT;
 	pPortPriv->preemption = 0;
@@ -935,12 +937,14 @@ fbdevPutImage( ScrnInfoPtr pScrnInfo,
 				/* update cliplist */
 				if (!REGION_EQUAL(pScrnInfo->pScreen, &pPortPriv->clip, clip_boxes))
 				{
+#if ENABLE_ARM
 					/* setting transparency length to 8 */
 					if (!pFBDev->bFbAlphaEnabled)
 					{
 						FBDevScreenAlphaInit(fbdevHWGetFD(pScrnInfo));
 						pFBDev->bFbAlphaEnabled = TRUE;
 					}
+#endif
 				}
 
 				return Success;

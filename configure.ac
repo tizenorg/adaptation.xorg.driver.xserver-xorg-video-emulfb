@@ -37,6 +37,11 @@ AC_ARG_ENABLE(v4l2,
                              [Enable v4l2 (default: enabled)]),
 			     [V4L2=$enableval], [V4L2=yes])
 
+AC_ARG_ENABLE(arm,
+	      AS_HELP_STRING([--enable-arm],
+                             [Enable arm (default: enabled)]),
+			     [ARM=$enableval], [ARM=no])
+
 # Checks for extensions
 XORG_DRIVER_CHECK_EXT(RANDR, randrproto)
 XORG_DRIVER_CHECK_EXT(RENDER, renderproto)
@@ -56,6 +61,12 @@ PKG_CHECK_MODULES(PIXMAN, pixman-1)
 
 EMULFB_CFLAGS="$EMULFB_CFLAGS $DLOG_CFLAGS $PIXMAN_CFLAGS $DRM_CFLAGS "
 EMULFB_LIBS="$EMULFB_LIBS $DLOG_LIBS $PIXMAN_LIBS $DRM_LIBS "
+
+
+AM_CONDITIONAL(ARM, test "x$ARM" = xyes)
+if test "x$ARM" = xyes; then
+    AC_DEFINE(ENABLE_ARM, 1, [Enable arm])
+fi
 
 AM_CONDITIONAL(V4L2, test "x$V4L2" = xyes)
 if test "x$V4L2" = xyes; then
