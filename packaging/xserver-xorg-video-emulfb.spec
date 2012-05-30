@@ -9,6 +9,7 @@ Release:    16
 Group:      System/X11
 License:    MIT
 Source0:    %{name}-%{version}.tar.gz
+Source1001: packaging/xserver-xorg-video-emulfb.manifest 
 
 BuildRequires:  prelink
 BuildRequires:  xorg-x11-util-macros
@@ -32,6 +33,7 @@ This package provides the driver for sdk emulation
 # << setup
 
 %build
+cp %{SOURCE1001} .
 # >> build pre
 # << build pre
 
@@ -52,6 +54,7 @@ execstack -c %{buildroot}%{_libdir}/xorg/modules/drivers/emulfb_drv.so
 # << install post
 
 %files
+%manifest xserver-xorg-video-emulfb.manifest
 %defattr(-,root,root,-)
 # >> files s5pc210
 %{_libdir}/xorg/modules/drivers/*.so
