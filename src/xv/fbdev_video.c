@@ -1,10 +1,12 @@
 /*
+ * xserver-xorg-video-emulfb
+ *
  * Copyright 2004 Keith Packard
  * Copyright 2005 Eric Anholt
  * Copyright 2006 Nokia Corporation
  * Copyright 2010 - 2011 Samsung Electronics co., Ltd. All Rights Reserved.
  *
- * Contact: YoungHoon Jung <yhoon.jung@samsung.com>
+ * Contact: Boram Park <boram1288.park@samsung.com>
  *
  * Permission to use, copy, modify, distribute and sell this software and its
  * documentation for any purpose is hereby granted without fee, provided that
@@ -30,17 +32,20 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
-
+#include <unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
 
+#include <pixman.h>
 #include <X11/Xatom.h>
 #include <X11/extensions/Xv.h>
 #include <X11/extensions/Xvproto.h>
+#include <X11/extensions/dpmsconst.h>
 #include "fourcc.h"
 
+#include "fb.h"
 #include "fbdevhw.h"
 #include "damage.h"
 
@@ -48,76 +53,23 @@
 
 #include "fbdev.h"
 
-#include "v4l2api.h"
-
+#include "fbdev_dpms.h"
 #include "fbdev_video.h"
-#include "fbdev_hw.h"
+#include "fbdev_util.h"
+#include "fbdev_util.h"
+#include "fbdev_fb.h"
+#include "fbdev_video_fourcc.h"
+#include "fbdev_video_v4l2.h"
 
 #include "xv_types.h"
 
-#define MAKE_ATOM(a) MakeAtom(a, sizeof(a) - 1, TRUE)
-
-#ifndef max
-#define max(x, y) (((x) >= (y)) ? (x) : (y))
-#endif
-
-#define ENSURE_AREA(offset, length, max) length = (offset + length > max ? max - offset : length)
-
-#define SWAP(x, y, t) t = x, x = y, y = t
+extern CallbackListPtr DPMSCallback;
 
 static XF86VideoEncodingRec DummyEncoding[] =
 {
-	/* Max width and height are filled in later. */
 	{ 0, "XV_IMAGE", -1, -1, { 1, 1 } },
 	{ 1, "XV_IMAGE", 2560, 2560, { 1, 1 } },
 };
-
-#define FOURCC_RGB565 0x50424742
-#define XVIMAGE_RGB565 \
-   { \
-    FOURCC_RGB565, \
-    XvRGB, \
-    LSBFirst, \
-    {'R','G','B','P', \
-        0x00,0x00,0x00,0x10,0x80,0x00,0x00,0xAA,0x00,0x38,0x9B,0x71}, \
-    16, \
-    XvPacked, \
-    1, \
-    16, 0x0000F800, 0x000007E0, 0x0000001F, \
-    0, 0, 0, 0, 0, 0, 0, 0, 0, \
-    {'R','G','B',0, \
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, \
-    XvTopToBottom \
-   }
-
-#define FOURCC_RGB32 0x34424752
-#define XVIMAGE_RGB32 \
-   { \
-    FOURCC_RGB32, \
-    XvRGB, \
-    LSBFirst, \
-    {'R','G','B','4', \
-        0x00,0x00,0x00,0x10,0x80,0x00,0x00,0xAA,0x00,0x38,0x9B,0x71}, \
-    32, \
-    XvPlanar, \
-    1, \
-    24, 0x00FF0000, 0x0000FF00, 0x000000FF, \
-    0, 0, 0, 0, 0, 0, 0, 0, 0, \
-    {'X','R','G','B', \
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, \
-    XvTopToBottom \
-   }
-
-static XF86ImageRec Images[] =
-{
-	XVIMAGE_I420,
-	XVIMAGE_YV12,
-	XVIMAGE_YUY2,
-	XVIMAGE_RGB32,
-	XVIMAGE_RGB565,
-};
-
-#define NUM_IMAGES (sizeof(Images) / sizeof(Images[0]))
 
 static XF86VideoFormatRec Formats[] =
 {
@@ -125,8 +77,6 @@ static XF86VideoFormatRec Formats[] =
 	{ 24, TrueColor },
 	{ 32, TrueColor },
 };
-
-#define NUM_FORMATS (sizeof(Formats) / sizeof(Formats[0]))
 
 static XF86AttributeRec Attributes[] =
 {
@@ -138,43 +88,23 @@ static XF86AttributeRec Attributes[] =
 	{ 0, 0, 1, "_USER_WM_PORT_ATTRIBUTE_STREAM_OFF" },
 };
 
-#define NUM_ATTRIBUTES (sizeof(Attributes) / sizeof(Attributes[0]))
-#define FBDEV_MAX_PORT    32
-
-static void
-fbdevGetRotation(ScreenPtr pScreen, FBDevPortPrivPtr pPortPriv, DrawablePtr pDraw, int * rotation, int * screen_rotation, int * xres, int * yres)
+typedef enum
 {
-	ScrnInfoPtr pScrnInfo = xf86Screens[pScreen->myNum];
-	FBDevPtr pFBDev = FBDEVPTR(pScrnInfo);
+	PAA_MIN,
+	PAA_ROTATION,
+	PAA_HFLIP,
+	PAA_VFLIP,
+	PAA_PREEMPTION,
+	PAA_DRAWINGMODE,
+	PAA_STREAMOFF,
+	PAA_MAX
+} FBDevPortAttrAtom;
 
-	*rotation = 0;
-	*screen_rotation = 0;
-
-#ifdef RANDR
-	switch(pFBDev->rotate)
-	{
-	case RR_Rotate_270:
-		*screen_rotation += 90;
-	case RR_Rotate_180:
-		*screen_rotation += 90;
-	case RR_Rotate_90:
-		*screen_rotation += 90;
-	case RR_Rotate_0:
-		break;
-	}
-#endif
-
-	if (pPortPriv->rotation >= 0)
-		*rotation = pPortPriv->rotation;
-	*screen_rotation = (*rotation - *screen_rotation + 360) % 360;
-}
-
-typedef enum { _PAA_MIN, PAA_ROTATION, PAA_HFLIP, PAA_VFLIP, PAA_PREEMPTION, PAA_DRAWINGMODE, PAA_STREAMOFF, _PAA_MAX } PORT_ATTR_ATOM;
 static struct
 {
-	PORT_ATTR_ATOM paa;
-	const char * name;
-	Atom atom;
+	FBDevPortAttrAtom  paa;
+	const char      *name;
+	Atom             atom;
 } atom_list[] =
 {
 	{ PAA_ROTATION, "_USER_WM_PORT_ATTRIBUTE_ROTATION", None },
@@ -185,185 +115,577 @@ static struct
 	{ PAA_STREAMOFF, "_USER_WM_PORT_ATTRIBUTE_STREAM_OFF", None },
 };
 
+static int registered_handler;
+extern CallbackListPtr DPMSCallback;
+
+#define FBDEV_MAX_PORT    16
+#define REQ_BUF_NUM       3
+
+#define NUM_FORMATS       (sizeof(Formats) / sizeof(Formats[0]))
+#define NUM_ATTRIBUTES    (sizeof(Attributes) / sizeof(Attributes[0]))
+#define NUM_ATOMS         (sizeof(atom_list) / sizeof(atom_list[0]))
+
+static void
+_fbdevVideoGetRotation (ScreenPtr      pScreen,
+                        FBDevPortPrivPtr pPortPriv,
+                        DrawablePtr    pDraw,
+                        int           *scn_rotate,
+                        int           *rotate,
+                        int           *hw_rotate)
+{
+	ScrnInfoPtr pScrnInfo = xf86Screens[pScreen->myNum];
+	FBDevPtr pFBDev = FBDEVPTR (pScrnInfo);
+
+	*scn_rotate = 0;
+	*rotate = 0;
+	*hw_rotate = 0;
+
+#ifdef RANDR
+	switch (pFBDev->rotate)
+	{
+	case RR_Rotate_90:
+		*scn_rotate += 90;
+	case RR_Rotate_180:
+		*scn_rotate += 90;
+	case RR_Rotate_270:
+		*scn_rotate += 90;
+	case RR_Rotate_0:
+		break;
+	}
+#endif
+
+	if (pPortPriv->rotate >= 0)
+		*rotate = pPortPriv->rotate;
+
+	*hw_rotate = (*rotate + *scn_rotate + 360) % 360;
+}
+
+static void
+_fbdevVideoCloseV4l2Handle (ScrnInfoPtr pScrnInfo, FBDevPortPrivPtr pPortPriv)
+{
+	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
+
+	if (!pPortPriv->v4l2_handle)
+		return;
+
+	fbdevVideoV4l2CloseHandle (pPortPriv->v4l2_handle);
+
+	pFBDev->v4l2_owner[pPortPriv->v4l2_index] = NULL;
+
+	pPortPriv->v4l2_handle = NULL;
+	pPortPriv->v4l2_index = -1;
+}
+
 static Atom
-getPortAtom(PORT_ATTR_ATOM paa)
+_fbdevVideoGetPortAtom (FBDevPortAttrAtom paa)
 {
 	int i;
-	static int n_atom_cnt = sizeof(atom_list) / sizeof(atom_list[0]);
 
-	if (paa <= _PAA_MIN || paa >= _PAA_MAX)
-	{
-		ErrorF("Error: Invalid Port Attribute Name!\n");
-		return None;
-	}
-	for (i=0; i<n_atom_cnt; i++)
+	return_val_if_fail (paa > PAA_MIN && paa < PAA_MAX, None);
+
+	for (i = 0; i < NUM_ATOMS; i++)
 	{
 		if (paa == atom_list[i].paa)
 		{
 			if (atom_list[i].atom == None)
-				atom_list[i].atom = MakeAtom (atom_list[i].name , strlen (atom_list[i].name), TRUE);
+				atom_list[i].atom = MakeAtom (atom_list[i].name, strlen (atom_list[i].name), TRUE);
 
 			return atom_list[i].atom;
 		}
 	}
 
-	ErrorF("Error: Unknown Port Attribute Name!\n");
+	ErrorF ("Error: Unknown Port Attribute Name!\n");
+
 	return None;
 }
 
-/**
- * Xv attributes get/set support.
- */
 static int
-fbdevGetPortAttribute(ScrnInfoPtr pScrnInfo, Atom attribute, INT32 *value,
-                      pointer data)
+_fbdevVideoInterfbdevtXRects (xRectangle *dest, xRectangle *src1, xRectangle *src2)
 {
-	FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) data;
+	int dest_x, dest_y;
+	int dest_x2, dest_y2;
+	int return_val;
 
-	if (attribute == getPortAtom(PAA_ROTATION))
+	return_val_if_fail (src1 != NULL, FALSE);
+	return_val_if_fail (src2 != NULL, FALSE);
+
+	return_val = FALSE;
+
+	dest_x = MAX (src1->x, src2->x);
+	dest_y = MAX (src1->y, src2->y);
+	dest_x2 = MIN (src1->x + src1->width, src2->x + src2->width);
+	dest_y2 = MIN (src1->y + src1->height, src2->y + src2->height);
+
+	if (dest_x2 > dest_x && dest_y2 > dest_y)
 	{
-		*value = pPortPriv->rotation;
+		if (dest)
+		{
+			dest->x = dest_x;
+			dest->y = dest_y;
+			dest->width = dest_x2 - dest_x;
+			dest->height = dest_y2 - dest_y;
+		}
+		return_val = TRUE;
+	}
+	else if (dest)
+	{
+		dest->width = 0;
+		dest->height = 0;
+	}
+
+	return return_val;
+}
+
+static int
+_fbdevVideoParseFormatBuffer (uchar *buf, uint *phy_addrs)
+{
+	XV_PUTIMAGE_DATA_PTR data = (XV_PUTIMAGE_DATA_PTR) buf;
+
+	int valid = XV_PUTIMAGE_VALIDATE_DATA (data);
+	if (valid < 0)
+		return valid;
+
+	phy_addrs[0] = data->YPhyAddr;
+	phy_addrs[1] = data->CbPhyAddr;
+	phy_addrs[2] = data->CrPhyAddr;
+
+	return 0;
+}
+
+static XF86ImageRec *
+_fbdevVideoGetImageInfo (int id)
+{
+	XF86ImagePtr pImages;
+	int i, count = 0;
+
+	pImages = fbdevVideoV4l2SupportImages (&count);
+
+	for (i = 0; i < count; i++)
+	{
+		if (pImages[i].id == id)
+			return &pImages[i];
+	}
+
+	return NULL;
+};
+
+static Bool
+_fbdevVideoSetMode (ScrnInfoPtr pScrnInfo, FBDevPortPrivPtr pPortPriv, int *index)
+{
+	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
+	Bool full = TRUE;
+	int  i = 0;
+
+	*index = -1;
+
+	if (pPortPriv->preemption == -1)
+	{
+		pPortPriv->mode = PORT_MODE_WAITING;
+		return TRUE;
+	}
+
+	for (i = 0; i < pFBDev->v4l2_num; i++)
+		if (!fbdevVideoV4l2HandleOpened (i))
+		{
+			full = FALSE;
+			break;
+		}
+
+	if (!full)
+	{
+		*index = i;
+		pPortPriv->mode = PORT_MODE_V4L2;
+		return TRUE;
+	}
+
+	/* All handles are occupied. So we need to steal one of them. */
+
+	if (pPortPriv->preemption == 0)
+	{
+		pPortPriv->mode = PORT_MODE_WAITING;
+		return TRUE;
+	}
+
+	for (i = 0; i < pFBDev->v4l2_num; i++)
+	{
+		FBDevPortPrivPtr pOwnerPort = (FBDevPortPrivPtr) pFBDev->v4l2_owner[i];
+
+		if (pOwnerPort && pOwnerPort->preemption == 0)
+		{
+			_fbdevVideoCloseV4l2Handle (pScrnInfo, pOwnerPort);
+
+			pOwnerPort->mode = PORT_MODE_WAITING;
+			pPortPriv->mode = PORT_MODE_V4L2;
+			*index = i;
+			return TRUE;
+		}
+	}
+
+	xf86DrvMsg (0, X_ERROR, "fbdev/put_image: Three or more preemptive ports were requested\n");
+
+	return FALSE;
+}
+
+static int
+_fbdevVideoPutImageV4l2 (ScrnInfoPtr pScrnInfo,
+                         FBDevPortPrivPtr pPortPriv,
+                         xRectangle *img,
+                         xRectangle *src,
+                         xRectangle *dst,
+                         RegionPtr   clip_boxes,
+                         int scn_rotate,
+                         int rotate,
+                         int hw_rotate,
+                         XF86ImageRec *image_info,
+                         uchar *buf,
+                         FBDevPortMode modeBefore,
+                         int v4l2_index,
+                         DrawablePtr pDraw)
+{
+	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
+	uint phy_addrs[4] = {0,};
+	FBDevV4l2Memory memory;
+	uint pixelformat;
+	int fmt_type = 0;
+
+	if (!fbdevVideoV4l2GetFormatInfo (image_info->id, &fmt_type, &pixelformat, &memory))
+	{
+		xf86DrvMsg (0, X_ERROR, "ID(%c%c%c%c) is not in 'format_infos'.\n",
+		            image_info->id & 0xFF, (image_info->id & 0xFF00) >> 8,
+		            (image_info->id & 0xFF0000) >> 16,  (image_info->id & 0xFF000000) >> 24);
+		return BadRequest;
+	}
+
+	if (memory == V4L2_MEMORY_USERPTR)
+	{
+		int ret;
+		if ((ret = _fbdevVideoParseFormatBuffer (buf, phy_addrs)) < 0)
+		{
+			if (ret == XV_HEADER_ERROR)
+				xf86DrvMsg (0, X_ERROR, "XV_HEADER_ERROR\n");
+			else if (ret == XV_VERSION_MISMATCH)
+				xf86DrvMsg (0, X_ERROR, "XV_VERSION_MISMATCH\n");
+
+			return BadRequest;
+		}
+
+		/* Skip frame */
+		if (phy_addrs[0] == 0)
+			return Success;
+	}
+
+	if (!pPortPriv->v4l2_handle)
+	{
+		pPortPriv->v4l2_handle = fbdevVideoV4l2OpenHandle (pScrnInfo->pScreen, v4l2_index, REQ_BUF_NUM);
+		if (!pPortPriv->v4l2_handle)
+		{
+			int other_index = (v4l2_index == 0) ? 1 : 0;
+			if (fbdevVideoV4l2HandleOpened (other_index))
+			{
+				xf86DrvMsg (0, X_ERROR, "fbdevVideoV4l2OpenHandle failed. no empty.\n");
+				return BadRequest;
+			}
+			else
+			{
+				pPortPriv->v4l2_handle = fbdevVideoV4l2OpenHandle (pScrnInfo->pScreen, other_index, REQ_BUF_NUM);
+				if (!pPortPriv->v4l2_handle)
+				{
+					xf86DrvMsg (0, X_ERROR, "fbdevVideoV4l2OpenHandle failed. fail open.\n");
+					return BadRequest;
+				}
+			}
+
+			v4l2_index = other_index;
+		}
+
+		pFBDev->v4l2_owner[v4l2_index] = (void*)pPortPriv;
+		pPortPriv->v4l2_index = v4l2_index;
+	}
+
+	if (!fbdevVideoV4l2CheckSize (pPortPriv->v4l2_handle, pixelformat, img, src, dst, fmt_type, V4L2_MEMORY_MMAP))
+		return BadRequest;
+
+	if (fbdevVideoV4l2SetFormat (pPortPriv->v4l2_handle, img, src, dst,
+	                             image_info->id, scn_rotate, hw_rotate,
+	                             pPortPriv->hflip, pPortPriv->vflip,
+	                             REQ_BUF_NUM, FALSE))
+	{
+		fbdevVideoV4l2Draw (pPortPriv->v4l2_handle, buf, phy_addrs);
+
+		if (modeBefore == PORT_MODE_WAITING)
+			pScrnInfo->pScreen->WindowExposures ((WindowPtr) pDraw, clip_boxes, NULL);
+
+		/* update cliplist */
+		if (!REGION_EQUAL (pScrnInfo->pScreen, &pPortPriv->clip, clip_boxes))
+		{
+			/* setting transparency length to 8 */
+			if (!pFBDev->bFbAlphaEnabled)
+			{
+				fbdevFbScreenAlphaInit (fbdevHWGetFD (pScrnInfo));
+				pFBDev->bFbAlphaEnabled = TRUE;
+			}
+		}
+
 		return Success;
 	}
-	else if (attribute == getPortAtom (PAA_HFLIP))
+
+	_fbdevVideoCloseV4l2Handle (pScrnInfo, pPortPriv);
+
+	pPortPriv->mode = PORT_MODE_WAITING;
+
+	return Success;
+}
+
+static Bool
+_fbdevVideoSetHWPortsProperty (ScreenPtr pScreen, int nums)
+{
+	WindowPtr pWin = pScreen->root;
+	Atom atom_hw_ports;
+
+	if (!pWin || !serverClient)
+		return FALSE;
+
+	atom_hw_ports = MakeAtom ("X_HW_PORTS", strlen ("X_HW_PORTS"), TRUE);
+
+	dixChangeWindowProperty (serverClient,
+	                         pWin, atom_hw_ports, XA_CARDINAL, 32,
+	                         PropModeReplace, 1, (unsigned int*)&nums, FALSE);
+
+	return TRUE;
+}
+
+static void
+_fbdevVideoDPMSHandler(CallbackListPtr *list, pointer closure, pointer calldata)
+{
+	FBDevDPMSPtr pDPMSInfo = (FBDevDPMSPtr) calldata;
+
+	if(!pDPMSInfo || !pDPMSInfo->pScrn)
+	{
+		xf86DrvMsg (0, X_ERROR, "[%s] DPMS info or screen info is invalid !\n", __FUNCTION__);
+		return;
+	}
+
+	switch(DPMSPowerLevel)
+	{
+	case DPMSModeOn:
+		break;
+
+	case DPMSModeSuspend:
+		break;
+
+	case DPMSModeStandby://LCD on
+	{
+		ScrnInfoPtr pScrnInfo = pDPMSInfo->pScrn;
+		FBDevPtr pFBDev = FBDEVPTR (pScrnInfo);
+		XF86VideoAdaptorPtr pAdaptor = pFBDev->pAdaptor;
+		int i;
+
+		DRVLOG ("%s : DPMSModeStandby \n", __FUNCTION__);
+
+		for (i = 0; i < FBDEV_MAX_PORT; i++)
+		{
+			FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) pAdaptor->pPortPrivates[i].ptr;
+			if (!pPortPriv->v4l2_handle || !pPortPriv->need_streamon)
+				continue;
+
+			if (!fbdevVideoV4l2StreamOn (pPortPriv->v4l2_handle))
+			{
+				/* will re-open if failed */
+				_fbdevVideoCloseV4l2Handle (pScrnInfo, pPortPriv->v4l2_handle);
+				pPortPriv->v4l2_handle = NULL;
+			}
+			pPortPriv->need_streamon = FALSE;
+		}
+		break;
+	}
+	case DPMSModeOff://LCD off
+	{
+		ScrnInfoPtr pScrnInfo = pDPMSInfo->pScrn;
+		FBDevPtr pFBDev = FBDEVPTR (pScrnInfo);
+		XF86VideoAdaptorPtr pAdaptor = pFBDev->pAdaptor;
+		int i;
+
+		DRVLOG ("%s : DPMSModeOff \n", __FUNCTION__);
+
+		for (i = 0; i < FBDEV_MAX_PORT; i++)
+		{
+			FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) pAdaptor->pPortPrivates[i].ptr;
+			if (!pPortPriv->v4l2_handle || pPortPriv->need_streamon)
+				continue;
+
+			fbdevVideoV4l2StreamOff (pPortPriv->v4l2_handle);
+			pPortPriv->need_streamon = TRUE;
+		}
+
+		break;
+	}
+	default:
+		return;
+	}
+}
+
+static void
+_fbdevVideoBlockHandler (pointer data, OSTimePtr pTimeout, pointer pRead)
+{
+	ScrnInfoPtr pScrnInfo = (ScrnInfoPtr)data;
+	FBDevPtr pFBDev = FBDEVPTR (pScrnInfo);
+	ScreenPtr pScreen = pScrnInfo->pScreen;
+
+	if(registered_handler && _fbdevVideoSetHWPortsProperty (pScreen, pFBDev->v4l2_num))
+	{
+		RemoveBlockAndWakeupHandlers(_fbdevVideoBlockHandler, (WakeupHandlerProcPtr)NoopDDA, data);
+		registered_handler = FALSE;
+	}
+}
+
+static int
+FBDevVideoGetPortAttribute (ScrnInfoPtr pScrnInfo,
+                            Atom        attribute,
+                            INT32      *value,
+                            pointer     data)
+{
+	DRVLOG ("[GetPortAttribute] \n");
+
+	FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) data;
+
+	if (attribute == _fbdevVideoGetPortAtom (PAA_ROTATION))
+	{
+		*value = pPortPriv->rotate;
+		return Success;
+	}
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_HFLIP))
 	{
 		*value = pPortPriv->hflip;
 		return Success;
 	}
-	else if (attribute == getPortAtom (PAA_VFLIP))
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_VFLIP))
 	{
 		*value = pPortPriv->vflip;
 		return Success;
 	}
-	else if (attribute == getPortAtom(PAA_PREEMPTION))
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_PREEMPTION))
 	{
 		*value = pPortPriv->preemption;
 		return Success;
 	}
-	else if (attribute == getPortAtom(PAA_DRAWINGMODE))
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_DRAWINGMODE))
 	{
-		*value = (pPortPriv->mode == MODE_VIRTUAL);
+		*value = (pPortPriv->mode == PORT_MODE_WAITING);
 		return Success;
 	}
 	return BadMatch;
 }
 
 static int
-fbdevSetPortAttribute(ScrnInfoPtr pScrnInfo, Atom attribute, INT32 value,
-                      pointer data)
+FBDevVideoSetPortAttribute (ScrnInfoPtr pScrnInfo,
+                            Atom        attribute,
+                            INT32       value,
+                            pointer     data)
 {
-	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
 	FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) data;
 
-	if (attribute == getPortAtom(PAA_ROTATION))
+	if (attribute == _fbdevVideoGetPortAtom (PAA_ROTATION))
 	{
-		pPortPriv->rotation = value;
+		pPortPriv->rotate = value;
+		DRVLOG ("[SetPortAttribute] rotate(%d) \n", value);
 		return Success;
 	}
-	else if (attribute == getPortAtom (PAA_HFLIP))
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_HFLIP))
 	{
 		pPortPriv->hflip = value;
+		DRVLOG ("[SetPortAttribute] hflip(%d) \n", value);
 		return Success;
 	}
-	else if (attribute == getPortAtom (PAA_VFLIP))
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_VFLIP))
 	{
 		pPortPriv->vflip = value;
+		DRVLOG ("[SetPortAttribute] vflip(%d) \n", value);
 		return Success;
 	}
-	else if (attribute == getPortAtom(PAA_PREEMPTION))
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_PREEMPTION))
 	{
 		pPortPriv->preemption = value;
+		DRVLOG ("[SetPortAttribute] preemption(%d) \n", value);
 		return Success;
 	}
-	else if (attribute == getPortAtom(PAA_STREAMOFF))
+	else if (attribute == _fbdevVideoGetPortAtom (PAA_STREAMOFF))
 	{
-		DeleteDisplay(pPortPriv->v4l2_handle, 0);
-		pPortPriv->v4l2_handle = NULL;
-		pFBDev->v4l2_owner[pPortPriv->v4l2_index] = NULL;
+		DRVLOG ("[SetPortAttribute] STREAMOFF \n");
+
+		if (!pPortPriv->need_streamon && pPortPriv->v4l2_handle)
+		{
+			fbdevVideoV4l2StreamOff (pPortPriv->v4l2_handle);
+			pPortPriv->need_streamon = TRUE;
+		}
+
 		return Success;
 	}
 	return BadMatch;
 }
 
-/**
- * Clip the image size to the visible screen.
- */
 static void
-fbdevQueryBestSize(ScrnInfoPtr pScrnInfo, Bool motion, short vid_w,
-                   short vid_h, short dst_w, short dst_h,
-                   unsigned int *p_w, unsigned int *p_h, pointer data)
+FBDevVideoQueryBestSize (ScrnInfoPtr pScrnInfo,
+                         Bool motion,
+                         short vid_w, short vid_h,
+                         short dst_w, short dst_h,
+                         uint *p_w, uint *p_h,
+                         pointer data)
 {
-	ScreenPtr pScreen = pScrnInfo->pScreen;
+	DRVLOG ("%s (%s:%d)\n", __FUNCTION__, __FILE__, __LINE__);
 
-	if (dst_w < pScreen->width)
-		*p_w = dst_w;
-	else
-		*p_w = pScreen->width;
-
-	if (dst_h < pScreen->height)
-		*p_h = dst_h;
-	else
-		*p_h = pScreen->height;
+	*p_w = dst_w;
+	*p_h = dst_h;
 }
 
-/**
- * Stop an overlay.  exit is whether or not the client's exiting.
- */
-void
-fbdevVideoStop(ScrnInfoPtr pScrnInfo, pointer data, Bool exit)
+static void
+FBDevVideoStop (ScrnInfoPtr pScrnInfo, pointer data, Bool exit)
 {
+	DRVLOG ("%s (%s:%d) exit(%d)\n", __FUNCTION__, __FILE__, __LINE__, exit);
+
 	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
 
 	FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) data;
 
-	if (pPortPriv->mode == MODE_V4L2)
+	if (pPortPriv->mode == PORT_MODE_V4L2)
 	{
-		if (pPortPriv->v4l2_handle && !DeleteDisplay(pPortPriv->v4l2_handle, 0))
-		{
-		}
+		_fbdevVideoCloseV4l2Handle (pScrnInfo, pPortPriv);
 
-		pPortPriv->v4l2_handle = NULL;
-		pFBDev->v4l2_owner[pPortPriv->v4l2_index] = NULL;
-
-#if ENABLE_ARM
 		if (pFBDev->bFbAlphaEnabled)
 		{
-			FBDevScreenAlphaDeinit(fbdevHWGetFD(pScrnInfo));
+			fbdevFbScreenAlphaDeinit (fbdevHWGetFD (pScrnInfo));
 			pFBDev->bFbAlphaEnabled = FALSE;
 		}
-#endif
 	}
-	pPortPriv->mode = MODE_INIT;
+
+	pPortPriv->mode = PORT_MODE_INIT;
 	pPortPriv->preemption = 0;
-	pPortPriv->rotation = -1;
+	pPortPriv->rotate = -1;
+	pPortPriv->need_streamon = FALSE;
 
 	if (exit)
-	{
-		REGION_EMPTY(pScrnInfo, &pPortPriv->clip);
-	}
+		REGION_EMPTY (pScrnInfo, &pPortPriv->clip);
 }
 
-/**
- * ReputImage hook.  We always fail here if we're mid-migration or
- * on Hailstorm; we want stopped video to actually be _stopped_, due
- * to Hailstorm limitations.
- */
 static int
-fbdevReputImage( ScrnInfoPtr pScrnInfo, short drw_x, short drw_y,
-                 RegionPtr clipBoxes, pointer data, DrawablePtr pDraw )
+FBDevVideoReputImage (ScrnInfoPtr pScrnInfo,
+                      short drw_x,
+                      short drw_y,
+                      RegionPtr clipBoxes,
+                      pointer data,
+                      DrawablePtr pDraw)
 
 {
 	return Success;
 }
 
-/**
- * Give image size and pitches.
- */
-static int
-fbdevQueryImageAttributes(ScrnInfoPtr pScrnInfo, int id, unsigned short *w,
-                          unsigned short *h, int *pitches, int *offsets)
+int
+fbdevVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
+                                int            id,
+                                unsigned short *w,
+                                unsigned short *h,
+                                int            *pitches,
+                                int            *offsets)
 {
-//    FbdevLog("FBDEV", LOGLEVEL_DEBUG, "%s (%s:%d)\n", __FUNCTION__, __FILE__, __LINE__);
 	int size = 0, tmp = 0;
 
 	*w = (*w + 1) & ~1;
@@ -378,6 +700,12 @@ fbdevQueryImageAttributes(ScrnInfoPtr pScrnInfo, int id, unsigned short *w,
 			pitches[0] = size;
 		size *= *h;
 		break;
+	case FOURCC_RGB24:
+		size += (*w << 1) + *w;
+		if (pitches)
+			pitches[0] = size;
+		size *= *h;
+		break;
 	case FOURCC_RGB32:
 		size += (*w << 2);
 		if (pitches)
@@ -385,8 +713,10 @@ fbdevQueryImageAttributes(ScrnInfoPtr pScrnInfo, int id, unsigned short *w,
 		size *= *h;
 		break;
 	case FOURCC_I420:
+	case FOURCC_S420:
 	case FOURCC_YV12:
-		size = *w;
+		*h = (*h + 1) & ~1;
+		size = (*w + 3) & ~3;
 		if (pitches)
 			pitches[0] = size;
 
@@ -394,7 +724,7 @@ fbdevQueryImageAttributes(ScrnInfoPtr pScrnInfo, int id, unsigned short *w,
 		if (offsets)
 			offsets[1] = size;
 
-		tmp = (*w >> 1);
+		tmp = ((*w >> 1) + 3) & ~3;
 		if (pitches)
 			pitches[1] = pitches[2] = tmp;
 
@@ -406,12 +736,31 @@ fbdevQueryImageAttributes(ScrnInfoPtr pScrnInfo, int id, unsigned short *w,
 		size += tmp;
 		break;
 	case FOURCC_UYVY:
+	case FOURCC_SUYV:
 	case FOURCC_YUY2:
+	case FOURCC_ST12:
+	case FOURCC_SN12:
 		size = *w << 1;
 		if (pitches)
 			pitches[0] = size;
 
 		size *= *h;
+		break;
+	case FOURCC_NV12:
+		size = *w;
+		if (pitches)
+			pitches[0] = size;
+
+		size *= *h;
+		if (offsets)
+			offsets[1] = size;
+
+		tmp = *w;
+		if (pitches)
+			pitches[1] = tmp;
+
+		tmp *= (*h >> 1);
+		size += tmp;
 		break;
 	default:
 		return BadIDChoice;
@@ -420,656 +769,191 @@ fbdevQueryImageAttributes(ScrnInfoPtr pScrnInfo, int id, unsigned short *w,
 	return size;
 }
 
-#define DONT_FILL_ALPHA -1
-
-static void
-fbdevDisplayVideo (PixmapPtr pPixmap, RegionPtr pRgn, unsigned char *buf, int src_x, int src_y, int width, int height, int alpha)
-{
-	xRectangle    *rects, *r;
-	int bpp;         //byte per pixel;
-	BoxPtr    pBox = REGION_RECTS (pRgn);
-	int        nBox = REGION_NUM_RECTS (pRgn);
-	int i, j;
-
-	unsigned char *pDst, *pSrc;
-	int offset_x=0, offset_y=0;
-#ifdef COMPOSITE
-	offset_x = pPixmap->screen_x;
-	offset_y = pPixmap->screen_y;
-#endif
-
-	rects = malloc (nBox * sizeof (xRectangle));
-	if (!rects)
-		goto bail0;
-	r = rects;
-
-	bpp = pPixmap->drawable.bitsPerPixel/8;
-
-	if (bpp != 4)
-		alpha = DONT_FILL_ALPHA;
-
-	while (nBox--)
-	{
-		r->x = pBox->x1 + pPixmap->drawable.x;
-		r->y = pBox->y1 + pPixmap->drawable.y;
-		r->width = pBox->x2 - pBox->x1;
-		r->height = pBox->y2 - pBox->y1;
-
-		if (buf)
-		{
-			pDst = (unsigned char*)pPixmap->devPrivate.ptr + ((r->y-offset_y) * pPixmap->devKind) + ((r->x-offset_x)*bpp);
-			pSrc = buf + (r->y - pRgn->extents.y1 + src_y)*width*bpp + (r->x - pRgn->extents.x1 + src_x)*bpp;
-
-			for(i=0; i<r->height; i++, pDst+=pPixmap->devKind, pSrc+=width*bpp)
-			{
-				memcpy(pDst, pSrc, r->width*bpp);
-			}
-		}
-
-		if (alpha != DONT_FILL_ALPHA)
-		{
-			pDst = (unsigned char*)pPixmap->devPrivate.ptr + ((r->y-offset_y) * pPixmap->devKind) + ((r->x-offset_x)*bpp);
-			for(i=0; i<r->height; i++, pDst+=pPixmap->devKind)
-				for(j=0; j<r->width; j++)
-					pDst[j*bpp + 3] = alpha;
-		}
-
-		r++;
-		pBox++;
-	}
-
-	free (rects);
-bail0:
-	;
-}
-
 static int
-fbdevTranslateV4L2toFourCC(V4L2Videoformat format)
-{
-	switch (format)
-	{
-	case V4L2_VIDEO_FMT_I420:
-		return FOURCC_I420;
-	case V4L2_VIDEO_FMT_YUY2:
-		return FOURCC_YUY2;
-	case V4L2_VIDEO_FMT_YV12:
-		return FOURCC_YV12;
-	case V4L2_VIDEO_FMT_RGB32:
-		return FOURCC_RGB32;
-	case V4L2_VIDEO_FMT_RGB565:
-		return FOURCC_RGB565;
-	default:
-		return 0;
-	}
-}
-
-static int
-intersectXRectangles ( xRectangle * dest, xRectangle * rect1, xRectangle * rect2)
-{
-	if (dest == NULL || rect1 == NULL || rect2 == NULL)
-		return -1;
-
-	dest->x = rect1->x > rect2->x ? rect1->x : rect2->x;
-	dest->y = rect1->y > rect2->y ? rect1->y : rect2->y;
-	dest->width = (rect1->x + rect1->width < rect2->x + rect2->width ? rect1->x + rect1->width : rect2->x + rect2->width) - dest->x;
-	dest->height = (rect1->y + rect1->height < rect2->y + rect2->height ? rect1->y + rect1->height : rect2->y + rect2->height) - dest->y;
-
-	if (dest->width <= 0 || dest->height <= 0)
-		return 0;
-
-	return 1;
-}
-
-static int
-fbdevPutStill ( ScrnInfoPtr pScrnInfo,
-                short vid_x, short vid_y, short drw_x, short drw_y,
-                short vid_w, short vid_h, short drw_w, short drw_h,
-                RegionPtr clipBoxes, pointer data, DrawablePtr pDraw )
-{
-	int ret = Success;
-	int rotation = 0;
-	unsigned short width, height;
-	V4L2Videoformat format;
-	FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) data;
-
-	if (pPortPriv->mode == MODE_INIT)
-		return Success;
-	if (pPortPriv->mode == MODE_V4L2 && pPortPriv->v4l2_handle == NULL)
-		return BadImplementation;
-
-	if (pPortPriv->mode == MODE_VIRTUAL)
-		return Success;
-
-	void * captured_image = GetCapture(pPortPriv->v4l2_handle, &width, &height,  &rotation, &format, FALSE);
-	PixmapPtr pPixmap;
-
-	ScreenPtr pScreen = pScrnInfo->pScreen;
-	if (pDraw->type == DRAWABLE_WINDOW)
-		pPixmap =
-		    (*pScreen->GetWindowPixmap)((WindowPtr) pDraw);
-	else
-		pPixmap = (PixmapPtr) pDraw;
-	int		bpp = pPixmap->drawable.bitsPerPixel/8;
-
-	ENSURE_AREA(vid_x, vid_w, pDraw->width);
-	ENSURE_AREA(vid_y, vid_h, pDraw->height);
-
-	xRectangle ResultRect;
-	xRectangle vid = { vid_x, vid_y, vid_w, vid_h };
-
-	if (intersectXRectangles(&ResultRect, &vid, &pPortPriv->dst) <= 0)
-		return Success;
-
-	int x1, y1;
-	unsigned short w1, h1;
-	x1 = (ResultRect.x - pPortPriv->dst.x) * width / pPortPriv->dst.width;
-	y1 = (ResultRect.y - pPortPriv->dst.y) * height / pPortPriv->dst.height;
-	w1 = ResultRect.width * width / pPortPriv->dst.width;
-	h1 = ResultRect.height * height / pPortPriv->dst.height;
-
-	int x2, y2;
-	unsigned short w2, h2;
-	x2 = ResultRect.x * drw_w / vid.width;
-	y2 = ResultRect.y * drw_h / vid.height;
-	w2 = ResultRect.width * drw_w / vid.width;
-	h2 = ResultRect.height * drw_h / vid.height;
-
-	void * pToBeFreed[8] = { NULL, };
-	int nToBeFreed = 0;
-
-	void * src_buf = NULL;
-	void * dst_buf = NULL;
-
-	int pitches[3], offsets[3];
-
-	int src_format, dst_format;
-	src_format = fbdevTranslateV4L2toFourCC(format);
-
-	dst_format = 	FOURCC_RGB32;
-
-	src_buf = captured_image;
-
-	if ( (x1 || y1) || (w1 != width) || (h1 != height) )
-	{
-		int size = fbdevQueryImageAttributes(NULL, src_format, &w1, &h1, NULL, NULL);
-		pToBeFreed[nToBeFreed++] = dst_buf = malloc(size);
-
-		fbdevQueryImageAttributes(NULL, src_format, &width, &height, pitches, offsets);
-		imgcpy(w1, h1, dst_buf, 0, 0, w1, h1,
-		       src_buf, x1, y1, width, height,
-		       pitches, offsets, src_format == FOURCC_I420 ? 3 : 1);
-
-		src_buf = dst_buf;
-	}
-
-	if ( (w1 != w2) || (h1 != h2) || (src_format != dst_format) )
-	{
-		pToBeFreed[nToBeFreed++] = dst_buf = malloc(w2 * h2 * bpp);
-		src_buf = dst_buf;
-	}
-
-	if ( (x2 || y2) || (w2 != drw_w) || (h2 != drw_h) )
-	{
-		pitches[0] = w2 * bpp;
-		pToBeFreed[nToBeFreed++] = dst_buf = calloc(drw_w * drw_h, bpp);
-		imgcpy(w2, h2, dst_buf, x2, y2, drw_w, drw_h,
-		       src_buf, 0, 0, w2, h2,
-		       pitches, NULL, 1);
-
-		src_buf = dst_buf;
-	}
-
-	fbdevDisplayVideo (pPixmap, clipBoxes, src_buf, 0, 0, drw_w, drw_h, 0xFF);
-
-	DamageDamageRegion(pDraw, clipBoxes);
-
-	return ret;
-}
-
-static void cropLine(int * src, int * length, const int crop, const int crop_length)
-{
-	if (*src < crop)
-	{
-		*length = *length - (crop - *src);
-		*src = crop;
-	}
-	if (*src + *length > crop + crop_length)
-		*length = crop + crop_length - *src;
-}
-
-static void cropBox(int * src_x, int * src_y, int * src_w, int * src_h, const int crop_x, const int crop_y, const int crop_w, const int crop_h)
-{
-	cropLine(src_x, src_w, crop_x, crop_w);
-	cropLine(src_y, src_h, crop_y, crop_h);
-}
-
-static void subtractBox(int * src_x, int * src_y, int * src_w, int * src_h, const int margin_x1, const int margin_x2, const int margin_y1, const int margin_y2)
-{
-	*src_x += margin_x1;
-	*src_w -= margin_x1 + margin_x2;
-	*src_y += margin_y1;
-	*src_h -= margin_y1 + margin_y2;
-}
-
-static void
-cropWindow(int xres, int yres, int src_x, int src_y, int src_w, int src_h, int dst_x, int dst_y, int dst_w, int dst_h, CRECT * crop, CRECT * win, int rotation)
-{
-	int temp;
-
-	int dstX = dst_x;
-	int dstY = dst_y;
-	int dstW = dst_w;
-	int dstH = dst_h;
-
-	int marginX1, marginX2, marginY1, marginY2;
-
-	cropBox(&dst_x, &dst_y, &dst_w, &dst_h, 0, 0, xres, yres);
-
-	win->x = dst_x, win->y = dst_y, win->w = dst_w, win->h = dst_h;
-
-	marginX1 = dst_x - dstX;
-	marginX2 = (dstX + dstW) - (dst_x + dst_w);
-	marginY1 = dst_y - dstY;
-	marginY2 = (dstY + dstH) - (dst_y + dst_h);
-
-	switch(rotation)
-	{
-	case 90:
-		temp = marginX1;
-		marginX1 = marginY1;
-		marginY1 = marginX2;
-		marginX2 = marginY2;
-		marginY2 = temp;
-		temp = dstW;
-		dstW = dstH;
-		dstH = temp;
-		break;
-	case 180:
-		temp = marginX1;
-		marginX1 = marginX2;
-		marginX2 = temp;
-		temp = marginY1;
-		marginY1 = marginY2;
-		marginY2 = temp;
-		break;
-	case 270:
-		temp = marginX2;
-		marginX2 = marginY1;
-		marginY1 = marginX1;
-		marginX1 = marginY2;
-		marginY2 = temp;
-		temp = dstW;
-		dstW = dstH;
-		dstH = temp;
-		break;
-	}
-
-	marginX1 = marginX1 * src_w / dstW;
-	marginX2 = marginX2 * src_w / dstW;
-	marginY1 = marginY1 * src_h / dstH;
-	marginY2 = marginY2 * src_h / dstH;
-
-	subtractBox(&src_x, &src_y, &src_w, &src_h, marginX1, marginX2, marginY1, marginY2);
-
-	crop->x = src_x;
-	crop->y = src_y;
-	crop->w = src_w;
-	crop->h = src_h;
-}
-
-typedef struct
-{
-	int fourcc;
-	V4L2Videoformat v4l2_format;
-	Bool useDirectHWBuf;
-} FORMAT_TYPE;
-
-static FORMAT_TYPE format_table[] =
-{
-	{ FOURCC_RGB565,	V4L2_VIDEO_FMT_RGB565,	FALSE },
-	{ FOURCC_RGB32,	V4L2_VIDEO_FMT_RGB32,	FALSE },
-	{ FOURCC_I420,	V4L2_VIDEO_FMT_I420,	FALSE },
-	{ FOURCC_YUY2,	V4L2_VIDEO_FMT_YUY2,	FALSE },
-	{ FOURCC_YV12,	V4L2_VIDEO_FMT_YV12,	FALSE },
-};
-
-static FORMAT_TYPE *
-getFormatInfo(int fourcc)
-{
-	int i;
-	static int size = sizeof(format_table) / sizeof(FORMAT_TYPE);
-
-	for (i = 0; i < size; i++)
-	{
-		if (format_table[i].fourcc == fourcc)
-			return &format_table[i];
-	}
-
-	ErrorF ("Emulator doens't support the '%c%c%c%c' type of image. \n",
-		fourcc & 0xFF, (fourcc & 0xFF00) >> 8, (fourcc & 0xFF0000) >> 16,  (fourcc & 0xFF000000) >> 24);
-
-	return NULL;
-}
-
-static int
-parseFormatBuffer(unsigned char * buf, unsigned int * phy_addrs)
-{
-	XV_PUTIMAGE_DATA_PTR data = (XV_PUTIMAGE_DATA_PTR) buf;
-
-	int valid = XV_PUTIMAGE_VALIDATE_DATA(data);
-	if (valid < 0)
-		return valid;
-
-	if (phy_addrs == NULL)
-		return -0x10;
-
-	phy_addrs[0] = data->YPhyAddr;
-	phy_addrs[1] = data->CbPhyAddr;
-	phy_addrs[2] = data->CrPhyAddr;
-
-	return 0;
-}
-
-static int
-fbdevPutImage( ScrnInfoPtr pScrnInfo,
-               short src_x, short src_y, short dst_x, short dst_y,
-               short src_w, short src_h, short dst_w, short dst_h,
-               int id, unsigned char* buf, short width, short height, Bool sync,
-               RegionPtr clip_boxes, pointer data, DrawablePtr pDraw )
+FBDevVideoPutImage (ScrnInfoPtr pScrnInfo,
+                    short src_x, short src_y, short dst_x, short dst_y,
+                    short src_w, short src_h, short dst_w, short dst_h,
+                    int id,
+                    uchar *buf,
+                    short width, short height,
+                    Bool sync,
+                    RegionPtr clip_boxes,
+                    pointer data,
+                    DrawablePtr pDraw)
 {
 	ScreenPtr pScreen = pScrnInfo->pScreen;
-	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
-
 	FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) data;
+	XF86ImageRec *image_info;
+	FBDevPortMode modeBefore = pPortPriv->mode;
+	xRectangle img = {0, 0, width, height};
+	xRectangle src = {src_x, src_y, src_w, src_h};
+	xRectangle dst = {dst_x, dst_y, dst_w, dst_h};
+	xRectangle clip;
+	BoxPtr clip_box;
+	int scn_rotate, rotate, hw_rotate;
+	int v4l2_index = 0;
+	FBDevPtr pFBDev = FBDEVPTR (pScrnInfo);
 
-	FBDEV_PORT_MODE modeBefore = pPortPriv->mode;
+	if (pFBDev->isLcdOff)
+		return Success;
 
 	pPortPriv->pDraw = pDraw;
-	int rotation, screen_rotation;
-	int v4l2_index = 0;
 
-	V4L2Videoformat format;
-	int nBuffer = 1;
-
-	int pitches[3], offsets[3];
-	unsigned short w = width, h = height;
-	PixmapPtr  pPixmap;
-
-	CRECT crop = {src_x, src_y, src_w, src_h};
-	CRECT win = {dst_x, dst_y, dst_w, dst_h};
-
-	int xres = pScreen->width, yres = pScreen->height;
-
-	FORMAT_TYPE * format_info = getFormatInfo(id);
-
-	unsigned int phy_addrs[4];
-	if (format_info == NULL)
+	image_info = _fbdevVideoGetImageInfo (id);
+	if (!image_info)
+	{
+		xf86DrvMsg (0, X_ERROR, "ID(%c%c%c%c) not supported.\n",
+		            id & 0xFF, (id & 0xFF00) >> 8,
+		            (id & 0xFF0000) >> 16,  (id & 0xFF000000) >> 24);
 		return BadRequest;
+	}
 
-	if (pDraw->type == DRAWABLE_WINDOW)
-		pPixmap = (*pScreen->GetWindowPixmap) ((WindowPtr) pDraw);
-	else
-		pPixmap = (PixmapPtr) pDraw;
+	if (pPortPriv->need_streamon && pPortPriv->v4l2_handle)
+	{
+		_fbdevVideoCloseV4l2Handle (pScrnInfo, pPortPriv->v4l2_handle);
+		pPortPriv->need_streamon = FALSE;
+		pPortPriv->v4l2_handle = NULL;
+	}
 
 	if (!pPortPriv->v4l2_handle)
-	{
-		pPortPriv->mode = MODE_VIRTUAL;
-
-		if (pPortPriv->preemption == 0)
-		{
-			int full = TRUE;
-			for (v4l2_index = 0; v4l2_index < pFBDev->v4l2_num; v4l2_index++)
-				if (AvailableDisplay (v4l2_index))
-				{
-					full = FALSE;
-					break;
-				}
-
-			if (full)
-				pPortPriv->mode = MODE_VIRTUAL;
-			else
-				pPortPriv->mode = MODE_V4L2;
-		}
-		else if (pPortPriv->preemption == 1)
-		{
-			int can_create = FALSE;
-			for (v4l2_index = 0; v4l2_index < pFBDev->v4l2_num; v4l2_index++)
-			{
-				FBDevPortPrivPtr pOwnerPort = (FBDevPortPrivPtr)pFBDev->v4l2_owner[v4l2_index];
-				if (!pOwnerPort)
-				{
-					can_create = TRUE;
-					pPortPriv->mode = MODE_V4L2;
-					break;
-				}
-				else if (pOwnerPort->preemption == 0)
-				{
-					can_create = TRUE;
-					fbdevPutStill (pScrnInfo,
-					               pOwnerPort->dst.x, pOwnerPort->dst.y, pOwnerPort->dst.x, pOwnerPort->dst.y,
-					               pOwnerPort->dst.width, pOwnerPort->dst.height, pOwnerPort->dst.width, pOwnerPort->dst.height,
-					               &pOwnerPort->clipBoxes, pOwnerPort, pOwnerPort->pDraw);
-
-					DeleteDisplay(pOwnerPort->v4l2_handle, 0);
-					pOwnerPort->v4l2_handle = NULL;
-					pFBDev->v4l2_owner[v4l2_index] = NULL;
-
-					pOwnerPort->mode = MODE_VIRTUAL;
-					pPortPriv->mode = MODE_V4L2;
-					break;
-				}
-			}
-
-			if (!can_create)
-			{
-				return BadRequest;
-			}
-		}
-	}
-
-	fbdevGetRotation(pScrnInfo->pScreen, pPortPriv, pDraw, &rotation, &screen_rotation, &xres, &yres);
-
-	if (pPortPriv->mode == MODE_V4L2)
-	{
-		if (format_info->useDirectHWBuf)
-		{
-			int ret;
-			if ((ret = parseFormatBuffer(buf, phy_addrs)) < 0)
-			{
-				if (ret == XV_HEADER_ERROR)
-					ErrorF("XV_HEADER_ERROR\n");
-				else if (ret == XV_VERSION_MISMATCH)
-					ErrorF("XV_VERSION_MISMATCH\n");
-				if (ret == -0x10)
-					ErrorF("phy_addrs_ERROR\n");
-
-				return BadRequest;
-			}
-
-			/* Skip frame */
-			if (phy_addrs[0] == 0)
-				return Success;
-		}
-
-		cropWindow(xres, yres, src_x, src_y, src_w, src_h, dst_x, dst_y, dst_w, dst_h, &crop, &win, rotation);
-
-		if (!format_info->useDirectHWBuf)
-		{
-			src_x = crop.x;
-			src_y = crop.y;
-			src_w = crop.w;
-			src_h = crop.h;
-			crop.x = crop.y = 0;
-
-			width = src_w;
-			height = src_h;
-		}
-
-		format = format_info->v4l2_format;
-
-		if (!pPortPriv->v4l2_handle)
-		{
-			pPortPriv->v4l2_index = CreateDisplay (&pPortPriv->v4l2_handle, v4l2_index, nBuffer);
-			pFBDev->v4l2_owner[pPortPriv->v4l2_index] = (void *)pPortPriv;
-		}
-
-		if (pPortPriv->v4l2_handle)
-		{
-			if(SetDisplayFormat(pPortPriv->v4l2_handle, width, height,
-			   &win, &crop, &win,
-			   format, screen_rotation,
-			   pPortPriv->hflip, pPortPriv->vflip,
-			   nBuffer, &pPortPriv->size))
-			{
-				fbdevQueryImageAttributes(NULL, id, &w, &h, pitches, offsets);
-
-				xRectangle img = {0, 0, w, h};
-				xRectangle pxm = {0, 0, win.w, win.h};
-				xRectangle draw = {0, 0, win.w, win.h};
-				xRectangle src = {src_x, src_y, src_w, src_h};
-				xRectangle dst = {0, 0, win.w, win.h};
-
-				DrawDisplay (pPortPriv->v4l2_handle, buf, &img, &pxm, &draw, &src, &dst, clip_boxes);
-
-				if (modeBefore == MODE_VIRTUAL)
-					pScrnInfo->pScreen->WindowExposures((WindowPtr) pDraw, clip_boxes, NULL);
-
-				/* update cliplist */
-				if (!REGION_EQUAL(pScrnInfo->pScreen, &pPortPriv->clip, clip_boxes))
-				{
-#if ENABLE_ARM
-					/* setting transparency length to 8 */
-					if (!pFBDev->bFbAlphaEnabled)
-					{
-						FBDevScreenAlphaInit(fbdevHWGetFD(pScrnInfo));
-						pFBDev->bFbAlphaEnabled = TRUE;
-					}
-#endif
-				}
-
-				return Success;
-			}
-			DeleteDisplay(pPortPriv->v4l2_handle, 0);
-			pPortPriv->v4l2_handle = NULL;
-			pFBDev->v4l2_owner[pPortPriv->v4l2_index] = NULL;
-		}
-
-		pPortPriv->mode = MODE_VIRTUAL;
-	}
-
-	if (pPortPriv->mode == MODE_VIRTUAL)
-	{
-		ScreenPtr pScreen = pScrnInfo->pScreen;
-		PixmapPtr pPixmap;
-
-		if (src_w != dst_w || src_h != dst_h)
-		{
+		if (!_fbdevVideoSetMode (pScrnInfo, pPortPriv, &v4l2_index))
 			return BadRequest;
-		}
-		if (id != FOURCC_RGB32)
-		{
-			return BadRequest;
-		}
 
-		if (pDraw->type == DRAWABLE_WINDOW)
-			pPixmap =
-			    (*pScreen->GetWindowPixmap)((WindowPtr) pDraw);
-		else
-			pPixmap = (PixmapPtr) pDraw;
-
-		fbdevDisplayVideo (pPixmap, clip_boxes, buf, src_x, src_y, width, height, DONT_FILL_ALPHA);
-
-		DamageDamageRegion(pDraw, clip_boxes);
-
-		if (modeBefore == MODE_V4L2)
-		{
-			if (!DeleteDisplay(pPortPriv->v4l2_handle, 0))
-			{
-			}
-			pPortPriv->v4l2_handle = NULL;
-			pFBDev->v4l2_owner[pPortPriv->v4l2_index] = NULL;
-		}
-
+	if (pPortPriv->mode != PORT_MODE_V4L2)
 		return Success;
-	}
 
-	return Success;
+	_fbdevVideoGetRotation (pScreen, pPortPriv, pDraw, &scn_rotate, &rotate, &hw_rotate);
+
+	clip_box = RegionRects(clip_boxes);
+	clip.x      = clip_box->x1;
+	clip.y      = clip_box->y1;
+	clip.width  = clip_box->x2 - clip_box->x1;
+	clip.height = clip_box->y2 - clip_box->y1;
+
+	DRVLOG ("[PutImage] buf(%p) ID(%c%c%c%c) mode(%s) preem(%d) handle(%p) rot(%d+%d=%d) res(%dx%d)\n",
+	        buf, id & 0xFF, (id & 0xFF00) >> 8, (id & 0xFF0000) >> 16,  (id & 0xFF000000) >> 24,
+	        pPortPriv->mode == PORT_MODE_WAITING ? "waiting" : "V4L2",
+	        pPortPriv->preemption,
+	        pPortPriv->v4l2_handle,
+	        scn_rotate, rotate, hw_rotate,
+	        pScreen->width, pScreen->height);
+
+	DRVLOG ("[PutImage] \tpDraw(%d,%d %dx%d) clip(%d,%d %dx%d)\n",
+	        pDraw->x, pDraw->y, pDraw->width, pDraw->height,
+	        clip.x, clip.y, clip.width, clip.height);
+
+	DRVLOG ("[PutImage] \t   img(%d,%d %dx%d) src(%d,%d %dx%d) dst(%d,%d %dx%d) \n",
+	        img.x, img.y, img.width, img.height,
+	        src.x, src.y, src.width, src.height,
+	        dst.x, dst.y, dst.width, dst.height);
+
+	_fbdevVideoInterfbdevtXRects (&src, &src, &img);
+
+	DRVLOG ("[PutImage] \t=> img(%d,%d %dx%d) src(%d,%d %dx%d) dst(%d,%d %dx%d) \n",
+	        img.x, img.y, img.width, img.height,
+	        src.x, src.y, src.width, src.height,
+	        dst.x, dst.y, dst.width, dst.height);
+
+	return _fbdevVideoPutImageV4l2 (pScrnInfo, pPortPriv, &img, &src, &dst, clip_boxes,
+	                                scn_rotate, rotate, hw_rotate,
+	                                image_info, buf, modeBefore, v4l2_index, pDraw);
 }
 
 /**
  * Set up all our internal structures.
  */
 static XF86VideoAdaptorPtr
-fbdevSetupImageVideo(ScreenPtr pScreen)
+fbdevVideoSetupImageVideo (ScreenPtr pScreen)
 {
+	DRVLOG ("%s (%s:%d)\n", __FUNCTION__, __FILE__, __LINE__);
+
 	XF86VideoAdaptorPtr pAdaptor;
 	FBDevPortPrivPtr pPortPriv;
+	XF86ImagePtr pImages;
+	int i, count = 0;
 
-	int i;
-
-	pAdaptor = calloc(1, sizeof(XF86VideoAdaptorRec) +
-	                  (sizeof(DevUnion) + sizeof(FBDevPortPriv)) * FBDEV_MAX_PORT);
+	pAdaptor = calloc (1, sizeof (XF86VideoAdaptorRec) +
+	                   (sizeof (DevUnion) + sizeof (FBDevPortPriv)) * FBDEV_MAX_PORT);
 	if (pAdaptor == NULL)
 		return NULL;
 
 	DummyEncoding[0].width = pScreen->width;
 	DummyEncoding[0].height = pScreen->height;
 
-	pAdaptor->type = XvWindowMask | XvInputMask | XvImageMask | XvStillMask;
+	pAdaptor->type = XvWindowMask | XvPixmapMask | XvInputMask | XvImageMask;
 	pAdaptor->flags = (VIDEO_CLIP_TO_VIEWPORT | VIDEO_OVERLAID_IMAGES);
 	pAdaptor->name = "FBDEV supporting Software Video Conversions";
-	pAdaptor->nEncodings = sizeof(DummyEncoding) / sizeof(XF86VideoEncodingRec);
+	pAdaptor->nEncodings = sizeof (DummyEncoding) / sizeof (XF86VideoEncodingRec);
 	pAdaptor->pEncodings = DummyEncoding;
 	pAdaptor->nFormats = NUM_FORMATS;
 	pAdaptor->pFormats = Formats;
 	pAdaptor->nPorts = FBDEV_MAX_PORT;
-	pAdaptor->pPortPrivates = (DevUnion *)(&pAdaptor[1]);
+	pAdaptor->pPortPrivates = (DevUnion*)(&pAdaptor[1]);
 
 	pPortPriv =
-	    (FBDevPortPrivPtr)(&pAdaptor->pPortPrivates[FBDEV_MAX_PORT]);
+	    (FBDevPortPrivPtr) (&pAdaptor->pPortPrivates[FBDEV_MAX_PORT]);
 
-	for(i=0; i<FBDEV_MAX_PORT; i++)
+	for (i=0; i<FBDEV_MAX_PORT; i++)
 	{
 		pAdaptor->pPortPrivates[i].ptr = &pPortPriv[i];
 
 		pPortPriv[i].index = i;
-		pPortPriv[i].rotation = -1;
+		pPortPriv[i].rotate = -1;
+		pPortPriv[i].v4l2_index = -1;
 
-		REGION_INIT(pScreen, &pPortPriv[i].clipBoxes, NullBox, 0);
+		REGION_INIT (pScreen, &pPortPriv[i].clipBoxes, NullBox, 0);
 	}
+
+	pImages = fbdevVideoV4l2SupportImages (&count);
 
 	pAdaptor->nAttributes = NUM_ATTRIBUTES;
 	pAdaptor->pAttributes = Attributes;
-	pAdaptor->nImages = NUM_IMAGES;
-	pAdaptor->pImages = Images;
+	pAdaptor->nImages = count;
+	pAdaptor->pImages = pImages;
 
-	pAdaptor->PutStill             = fbdevPutStill;
-	pAdaptor->PutImage             = fbdevPutImage;
-	pAdaptor->ReputImage           = fbdevReputImage;
-	pAdaptor->StopVideo            = fbdevVideoStop;
-	pAdaptor->GetPortAttribute     = fbdevGetPortAttribute;
-	pAdaptor->SetPortAttribute     = fbdevSetPortAttribute;
-	pAdaptor->QueryBestSize        = fbdevQueryBestSize;
-	pAdaptor->QueryImageAttributes = fbdevQueryImageAttributes;
+	pAdaptor->PutImage             = FBDevVideoPutImage;
+	pAdaptor->ReputImage           = FBDevVideoReputImage;
+	pAdaptor->StopVideo            = FBDevVideoStop;
+	pAdaptor->GetPortAttribute     = FBDevVideoGetPortAttribute;
+	pAdaptor->SetPortAttribute     = FBDevVideoSetPortAttribute;
+	pAdaptor->QueryBestSize        = FBDevVideoQueryBestSize;
+	pAdaptor->QueryImageAttributes = fbdevVideoQueryImageAttributes;
 
 	return pAdaptor;
 }
 
+#ifdef XV
 /**
  * Set up everything we need for Xv.
  */
-Bool fbdevVideoInit(ScreenPtr pScreen)
+Bool fbdevVideoInit (ScreenPtr pScreen)
 {
+	DRVLOG ("%s (%s:%d)\n", __FUNCTION__, __FILE__, __LINE__);
+
 	ScrnInfoPtr pScrnInfo = xf86Screens[pScreen->myNum];
 	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
 
-	pFBDev->pAdaptor = fbdevSetupImageVideo(pScreen);
+	pFBDev->pAdaptor = fbdevVideoSetupImageVideo (pScreen);
 
 	if (pFBDev->pAdaptor)
 	{
-		xf86XVScreenInit(pScreen, &pFBDev->pAdaptor, 1);
-		pFBDev->v4l2_num = GetDisplayNums ();
-		pFBDev->v4l2_owner = (void**)calloc(sizeof (void*), pFBDev->v4l2_num);
+		xf86XVScreenInit (pScreen, &pFBDev->pAdaptor, 1);
+
+		pFBDev->v4l2_num   = fbdevVideoV4l2GetHandleNums ();
+		pFBDev->v4l2_owner = (void**)calloc (sizeof (void*), pFBDev->v4l2_num);
+
+		if(registered_handler == FALSE)
+		{
+			RegisterBlockAndWakeupHandlers(_fbdevVideoBlockHandler, (WakeupHandlerProcPtr)NoopDDA, pScrnInfo);
+			registered_handler = TRUE;
+		}
+
+		if (AddCallback (&DPMSCallback, _fbdevVideoDPMSHandler, NULL) != TRUE)
+		{
+			xf86DrvMsg (pScrnInfo->scrnIndex, X_ERROR, "Failed to register _fbdevVideoDPMSHandler. \n");
+			return FALSE;
+		}
+
 		return TRUE;
 	}
 	else
@@ -1079,8 +963,10 @@ Bool fbdevVideoInit(ScreenPtr pScreen)
 /**
  * Shut down Xv, used on regeneration.
  */
-void fbdevVideoFini(ScreenPtr pScreen)
+void fbdevVideoFini (ScreenPtr pScreen)
 {
+	DRVLOG ("%s (%s:%d)\n", __FUNCTION__, __FILE__, __LINE__);
+
 	ScrnInfoPtr pScrnInfo = xf86Screens[pScreen->myNum];
 	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
 
@@ -1090,29 +976,26 @@ void fbdevVideoFini(ScreenPtr pScreen)
 	if (!pAdaptor)
 		return;
 
-	for(i = 0; i < FBDEV_MAX_PORT; i++)
+	DeleteCallback (&DPMSCallback, _fbdevVideoDPMSHandler, NULL);
+
+	for (i = 0; i < FBDEV_MAX_PORT; i++)
 	{
 		FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) pAdaptor->pPortPrivates[i].ptr;
 
-		REGION_UNINIT(pScreen, &pPortPriv->clipBoxes);
+		REGION_UNINIT (pScreen, &pPortPriv->clipBoxes);
 
-		if(pPortPriv->v4l2_handle)
-			DeleteDisplay(pPortPriv->v4l2_handle, 0);
+		_fbdevVideoCloseV4l2Handle (pScrnInfo, pPortPriv);
 	}
 
-	free(pAdaptor);
+	free (pAdaptor);
 	pFBDev->pAdaptor = NULL;
 
 	if (pFBDev->v4l2_owner)
 	{
-		free(pFBDev->v4l2_owner);
+		free (pFBDev->v4l2_owner);
 		pFBDev->v4l2_owner = NULL;
 		pFBDev->v4l2_num = 0;
 	}
 }
 
-int
-fbdevVideoProcessArgument (int argc, char **argv, int i)
-{
-	return 1;
-}
+#endif

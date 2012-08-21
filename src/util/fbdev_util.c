@@ -158,3 +158,69 @@ fbdev_util_get_window_property(WindowPtr pWin, const char* prop_name)
 }
 
 
+void
+fbdev_util_rotate_rect (int xres,
+                        int yres,
+                        int src_rot,
+                        int dst_rot,
+                        xRectangle *src)
+{
+	int diff;
+	xRectangle temp;
+
+	return_if_fail (src != NULL);
+
+	if (src_rot == dst_rot)
+		return;
+
+	diff = (dst_rot - src_rot);
+	if (diff < 0)
+		diff = 360 + diff;
+
+	if (src_rot % 180 && diff % 180)
+		SWAP (xres, yres);
+
+	switch (diff)
+	{
+	case 270:
+		temp.x = yres - (src->y + src->height);
+		temp.y = src->x;
+		temp.width  = src->height;
+		temp.height = src->width;
+		break;
+	case 180:
+		temp.x = xres  - (src->x + src->width);
+		temp.y = yres - (src->y + src->height);
+		temp.width  = src->width;
+		temp.height = src->height;
+		break;
+	case 90:
+		temp.x = src->y;
+		temp.y = xres - (src->x + src->width);
+		temp.width  = src->height;
+		temp.height = src->width;
+		break;
+	default:
+		temp.x = src->x;
+		temp.y = src->y;
+		temp.width  = src->width;
+		temp.height = src->height;
+		break;
+	}
+
+	*src = temp;
+}
+
+
+void
+drvlog (const char * f, ...)
+{
+    va_list args;
+    char temp[1024];
+
+    va_start (args, f);
+    vsnprintf (temp, sizeof (temp), f, args);
+    va_end (args);
+
+    fwrite (temp, strlen (temp), 1, stderr);
+}

@@ -51,6 +51,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "fbdev_video.h"
 #include "fbdev_crtcconfig.h"
 #include "fbdev_dpms.h"
+#include "fbdev_event_trace.h"
 
 #include <string.h>
 #include <sys/ioctl.h>
@@ -701,6 +702,9 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 	pFBDev->CloseScreen = pScreen->CloseScreen;
 	pScreen->CloseScreen = FBDevCloseScreen;
 
+    /* register the event hook */
+    fbdevTraceInstallHooks ();
+
 	return TRUE;
 }
 
@@ -731,6 +735,8 @@ FBDevCloseScreen(int scrnIndex, ScreenPtr pScreen)
 {
 	ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
 	FBDevPtr pFBDev = FBDEVPTR(pScrn);
+
+    fbdevTraceUninstallHooks ();
 
 	FBDevRestore(pScrn);
 

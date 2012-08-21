@@ -29,6 +29,37 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 **************************************************************************/
 #include "property.h"
 
+#ifndef CLEAR
+#define CLEAR(x) memset(&(x), 0, sizeof (x))
+#endif
+
+#ifndef MAX
+#define MAX(a,b) (((a) > (b)) ? (a) : (b))
+#endif
+#ifndef MIN
+#define MIN(a,b) (((a) < (b)) ? (a) : (b))
+#endif
+
+#ifndef SWAP
+#define SWAP(a, b)  ({int t; t = a; a = b; b = t;})
+#endif
+
+#ifndef FALSE
+#define FALSE 0
+#endif
+
+#ifndef TRUE
+#define TRUE 1
+#endif
+
+void drvlog (const char * f, ...);
+
+#if ENABLE_DEBUG
+#define DRVLOG(fmt, arg...)      drvlog(fmt, ##arg)
+#else
+#define DRVLOG(fmt, arg...)      {;}
+#endif
+
 #define return_if_fail(cond)          {if (!(cond)) { ErrorF ("%s : '%s' failed.\n", __FUNCTION__, #cond); return; }}
 #define return_val_if_fail(cond, val) {if (!(cond)) { ErrorF ("%s : '%s' failed.\n", __FUNCTION__, #cond); return val; }}
 #define goto_if_fail(cond, dst)       {if (!(cond)) { ErrorF ("%s : '%s' failed.\n", __FUNCTION__, #cond); goto dst; }}
@@ -36,6 +67,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 int fbdev_util_degree_to_rotate(int degree);
 int fbdev_util_rotate_to_degree(int rotate);
 int fbdev_util_rotate_add(int rot_a, int rot_b);
+
+void fbdev_util_rotate_rect (int xres, int yres, int src_rot, int dst_rot, xRectangle *src);
 
 const PropertyPtr fbdev_util_get_window_property(WindowPtr pWin, const char* prop_name);
 

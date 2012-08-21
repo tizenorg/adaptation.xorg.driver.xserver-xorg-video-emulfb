@@ -31,6 +31,13 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef FBDEV_DPMS_H
 #define FBDEV_DPMS_H
 
+typedef struct
+{
+    ScrnInfoPtr pScrn;
+    int mode;
+    int flags;
+} FBDevDPMSRec, *FBDevDPMSPtr;
+
 xf86DPMSSetProc* FBDevDPMSSet(void);
 SaveScreenProcPtr FBDevSaveScreen(void);
 

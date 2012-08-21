@@ -1,17 +1,17 @@
 # >> macros
 # << macros
 
-Name:       xserver-xorg-video-emulfb
+Name:       xorg-x11-drv-emulfb
 Summary:    X.Org X server driver for sdk emulation
-Version:    0.2.0
+Version:    0.5.0
 Release:    16
 #ExclusiveArch:  %arm
-Group:      System/X11
-License:    MIT
+Group:      System/X Hardware Support
+License:    Samsung
 Source0:    %{name}-%{version}.tar.gz
 
 BuildRequires:  prelink
-BuildRequires:  xorg-x11-util-macros
+BuildRequires:  xorg-x11-xutils-dev
 BuildRequires:  pkgconfig(xorg-server)
 BuildRequires:  pkgconfig(randrproto)
 BuildRequires:  pkgconfig(renderproto)
@@ -35,8 +35,15 @@ This package provides the driver for sdk emulation
 # >> build pre
 # << build pre
 
-%reconfigure --disable-static \
-LDFLAGS="-Wl,--hash-style=both -Wl,--as-needed"
+%ifarch %{arm}
+%define ENABLE_ARM --enable-arm
+%else
+%define ENABLE_ARM --disable-arm
+%endif
+
+%reconfigure --disable-static %{ENABLE_ARM} \
+    CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS} -Wl,--hash-style=both -Wl,--as-needed"
+
 make %{?jobs:-j%jobs}
 
 # >> build post
@@ -53,7 +60,7 @@ execstack -c %{buildroot}%{_libdir}/xorg/modules/drivers/emulfb_drv.so
 
 %files
 %defattr(-,root,root,-)
-# >> files s5pc210
+# >> files emulfb
 %{_libdir}/xorg/modules/drivers/*.so
 %{_datadir}/man/man4/*
 # << files emulfb

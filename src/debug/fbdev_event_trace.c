@@ -4,7 +4,7 @@ xserver-xorg-video-emulfb
 
 Copyright 2010 - 2011 Samsung Electronics co., Ltd. All Rights Reserved.
 
-Contact: YoungHoon Jung <yhoon.jung@samsung.com>
+Contact: SooChan Lim <sc1.lim@samsung.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the
@@ -28,41 +28,73 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 **************************************************************************/
 
-#ifndef __V4L2CONFIG_H__
-#define __V4L2CONFIG_H__
+#include "fbdev.h"
+#include "xace.h"
+#include "xacestr.h"
 
-#define _V4L2_DEBUG // Disable this to speed up
-#define _NEON_MEMCPY_
-//#define RP_SCALER
+#if 0
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
 
-#ifndef FALSE
-#define FALSE 0
-#define TRUE  (!FALSE)
+#include <sys/types.h>
+#include <sys/fcntl.h>
+#include <unistd.h>
+#include <stdarg.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <X11/Xatom.h>
+#include <X11/extensions/XI2proto.h>
+
+#include "windowstr.h"
+
+#define XREGISTRY
+#include "registry.h"
+
+#define __USE_GNU
+#include <sys/socket.h>
+#include <linux/socket.h>
+
+#ifdef HAS_GETPEERUCRED
+# include <ucred.h>
+#endif
 #endif
 
-typedef struct _CRECT
+static void
+_traceReceive (CallbackListPtr *pcbl, pointer unused, pointer calldata)
 {
-        int x;
-        int y;
-        int w;
-        int h;
-} CRECT;
+    XaceReceiveAccessRec *rec = calldata;
 
-typedef enum {
-        V4L2_VIDEO_FMT_UNKNOWN,
-        V4L2_VIDEO_FMT_UYVY,
-        V4L2_VIDEO_FMT_YUYV,
-        V4L2_VIDEO_FMT_YUY2,
-        V4L2_VIDEO_FMT_YV12,
-        V4L2_VIDEO_FMT_SUY2,
-        V4L2_VIDEO_FMT_I420,
-        V4L2_VIDEO_FMT_S420,
-        V4L2_VIDEO_FMT_YU12,
-        V4L2_VIDEO_FMT_NV12,
-        V4L2_VIDEO_FMT_NV12T,
-		V4L2_VIDEO_FMT_RGB565,
-        V4L2_VIDEO_FMT_RGB24,
-        V4L2_VIDEO_FMT_RGB32,
-} V4L2Videoformat;
+    if (rec->events->u.u.type != VisibilityNotify)
+	return;
 
-#endif 	// __V4L2CONFIG_H__
+    rec->status = BadAccess;
+}
+
+Bool
+fbdevTraceInstallHooks (void)
+{
+    int ret = TRUE;
+
+    /*Disable Visibility Event*/
+    ret &= XaceRegisterCallback (XACE_RECEIVE_ACCESS, _traceReceive, NULL);
+
+    if (!ret)
+    {
+        ErrorF ("fbdevInstallHooks: Failed to register one or more callbacks\n");
+        return BadAlloc;
+    }
+
+    return Success;
+}
+
+
+Bool
+fbdevTraceUninstallHooks (void)
+{
+    XaceDeleteCallback (XACE_RECEIVE_ACCESS, _traceReceive, NULL);
+
+    return Success;
+}
+

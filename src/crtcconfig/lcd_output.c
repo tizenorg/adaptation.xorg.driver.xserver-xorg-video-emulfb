@@ -231,7 +231,7 @@ void LcdOutputInit(ScrnInfoPtr pScrn)
 	xf86OutputPtr	    output;
 	FBDevOutputPrivPtr    lcd_output;
 
-	output = xf86OutputCreate (pScrn, &lcd_output_funcs, "LCD");
+	output = xf86OutputCreate (pScrn, &lcd_output_funcs, "LVDS1");
 	if (!output)
 		return;
 	lcd_output = xnfcalloc (sizeof (FBDevOutputPriv), 1);

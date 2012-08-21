@@ -28,7 +28,7 @@ else
 endif
 
 ifeq (armel, $(DEB_HOST_ARCH))
-   confflags += --disable-v4l2
+   confflags += --enable-v4l2
    confflags += --enable-arm
 endif
 

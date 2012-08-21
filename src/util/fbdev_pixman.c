@@ -69,6 +69,10 @@ fbdev_pixman_convert_image (int         xres,
 	return_val_if_fail (dst != NULL, FALSE);
 	return_val_if_fail (rotate <= 360 && rotate >= -360, FALSE);
 
+    DRVLOG ("[Convert] img(%dx%d) src(%d,%d %dx%d) dst(%dx%d) flip(%d,%d), r(%d)\n",
+            img->width, img->height, src->x, src->y, src->width, src->height,
+            dst->width, dst->height, hflip, vflip, rotate);
+
 	op = PIXMAN_OP_SRC;
 
 	src_bpp = PIXMAN_FORMAT_BPP (src_format) / 8;
@@ -92,14 +96,14 @@ fbdev_pixman_convert_image (int         xres,
 
 	if (hflip)
 	{
-		pixman_f_transform_scale (&ft, NULL, 1, -1);
-		pixman_f_transform_translate (&ft, NULL, 0, (rotate_step%2)?draw->width:draw->height);
+		pixman_f_transform_scale (&ft, NULL, -1, 1);
+		pixman_f_transform_translate (&ft, NULL, draw->width, 0);
 	}
 
 	if (vflip)
 	{
-		pixman_f_transform_scale (&ft, NULL, -1, 1);
-		pixman_f_transform_translate (&ft, NULL, (rotate_step%2)?draw->height:draw->width, 0);
+		pixman_f_transform_scale (&ft, NULL, 1, -1);
+		pixman_f_transform_translate (&ft, NULL, 0, draw->height);
 	}
 
 	if (rotate_step > 0)

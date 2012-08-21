@@ -4,7 +4,7 @@ xserver-xorg-video-emulfb
 
 Copyright 2010 - 2011 Samsung Electronics co., Ltd. All Rights Reserved.
 
-Contact: YoungHoon Jung <yhoon.jung@samsung.com>
+Contact: SooChan Lim <sc1.lim@samsung.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the
@@ -28,30 +28,27 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 **************************************************************************/
 
-#include "v4l2config.h"
-#include "v4l2_output_api.h"
+#ifndef __FBDEV_FB_H__
+#define __FBDEV_FB_H__
 
-int GetDisplayNums (void);
-int AvailableDisplay (int index);
+#include <linux/fb.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <X11/Xdefs.h>
 
-int CreateDisplay(void **pphandle, int index, int requestbuffer);
+Bool	fbdevFbGetVarScreenInfo (int fd, struct fb_var_screeninfo *fbVarInfo);
+Bool	fbdevFbSetVarScreenInfo (int fd, struct fb_var_screeninfo *fbVarInfo);
+Bool	fbdevFbGetFixScreenInfo (int fd, struct fb_fix_screeninfo *fbFixInfo);
 
-int DeleteDisplay(void *phandle, int exit);
+Bool    fbdevFbSetWinPosition (int fd, int x, int y);
 
-int SetDisplayFormat(void *phandle, int w, int h, CRECT *dest, CRECT *crop, CRECT *win, V4L2Videoformat format, int rotate, int hflip, int vflip, int requestbuffer, int *imagesize);
+Bool fbdevFbScreenAlphaInit (int fd);
+Bool fbdevFbScreenAlphaDeinit (int fd);
+void fbdevFbResetLCDModule (void);
+Bool fbdevFbActivate (int fd);
+Bool fbdevFbDeActivate (int fd);
+Bool fbdevFbSetBase (int fd);
+void fbdevFbHWPanDisplay (int fd, int x, int y);
 
-int DrawDisplay (void *phandle,
-                 unsigned char *buf,
-                 xRectangle *img,
-                 xRectangle *pixmap,
-                 xRectangle *draw,
-                 xRectangle *src,
-                 xRectangle *dst,
-                 RegionPtr   clip_region);
-
-void * GetCapture(void * phandle, unsigned short * width, unsigned short * height,  int * rotation, V4L2Videoformat * format, int bUseRpScaler);
-
-void * imgcpy(int width, int height,
-				void * d, int d_off_x, int d_off_y, int d_size_w, int d_size_h,
-				void *s, int s_off_x, int s_off_y, int s_size_w, int s_size_h,
-				int * pitches, int * offsets, int channel);
+#endif //__FBDEV_FB_H__

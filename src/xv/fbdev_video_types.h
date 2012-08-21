@@ -28,39 +28,80 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 **************************************************************************/
 
-#ifndef __FBDEV_PIXMAN_H__
-#define __FBDEV_PIXMAN_H__
+#ifndef __FBDEV_V4L2_TYPES_H__
+#define __FBDEV_V4L2_TYPES_H__
 
 #include <sys/types.h>
 #include <X11/Xdefs.h>
-#include <fbdevhw.h>
 
-#include <pixman.h>
+#include <linux/videodev2.h>
 
-#ifndef FALSE
-#define FALSE 0
-#define TRUE  (!FALSE)
+enum
+{
+	OUTPUT_PATH_DMA,	/* FrameBuffer */
+	OUTPUT_PATH_FIMD,	/* LCD */
+};
+
+/************************************************************
+ * TYPE DEFINITION
+ ************************************************************/
+typedef enum v4l2_buf_type FBDevV4l2BufType;
+typedef enum v4l2_memory   FBDevV4l2Memory;
+
+#ifndef uint
+typedef unsigned int uint;
 #endif
 
-#ifndef NULL
-#define NULL (void*)0
+#ifndef uchar
+typedef unsigned char uchar;
 #endif
 
-int
-fbdev_pixman_convert_image (int         xres,
-                            int         yres,
-                            unsigned char      *srcbuf,
-                            unsigned char      *dstbuf,
-                            pixman_format_code_t src_format,
-                            pixman_format_code_t dst_format,
-                            xRectangle *img,
-                            xRectangle *pixmap,
-                            xRectangle *draw,
-                            xRectangle *src,
-                            xRectangle *dst,
-                            RegionPtr   clip_region,
-                            int         rotate,
-                            int         hflip,
-                            int         vflip);
+#ifndef ushort
+typedef unsigned short ushort;
+#endif
 
-#endif /* __FBDEV_PIXMAN_H__ */
+/************************************************************
+ * STRUCTURE
+ ************************************************************/
+typedef struct _FBDevV4l2Data
+{
+	__u32	path;
+	__u32	in_format;
+	__u32	out_format;
+	__u32	field;
+	char	in_file_name[50];
+
+	struct v4l2_rect src;
+	struct v4l2_rect crop;
+	struct v4l2_rect dst;
+	struct v4l2_rect win;
+
+	__u32	s_size[3];
+	__u32	src_size;
+	__u32	d_size[3];
+	__u32	dst_size;
+
+	int	    rotation;
+} FBDevV4l2Data;
+
+typedef struct _FBDevV4l2FimcBuffer
+{
+	uint    base[3];
+	size_t  length[3];
+} FBDevV4l2FimcBuffer;
+
+typedef struct _FBDevV4l2SrcBuffer
+{
+	int     index;
+	int     size;
+	uchar  *buf;
+} FBDevV4l2SrcBuffer;
+
+typedef struct _FBDevV4l2DstBuffer
+{
+	int     index;
+	int     size;
+	uchar  *buf;
+} FBDevV4l2DstBuffer;
+
+#endif

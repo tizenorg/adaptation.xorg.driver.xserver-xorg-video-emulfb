@@ -44,7 +44,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PAGE_SIZE 4096
 
 #define FBDEV_VERSION 1000 /* the version of the driver */
-#define FBDEV_NAME "SEC" /* the name used to prefix messages */
+#define FBDEV_NAME "FBDEV" /* the name used to prefix messages */
 #define FBDEV_DRIVER_NAME "emulfb" /* the driver name as used in config file.
 				 * This name should match the name of the driver module binary
 				 * In this driver, the name of the driver libary module is emulfb_drv.so.

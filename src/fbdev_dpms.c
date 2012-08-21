@@ -42,10 +42,34 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "misc.h"
 #include "fbdev_dpms.h"
 
+CallbackListPtr DPMSCallback;
+
+static void
+_dpmsCallCallback (ScrnInfoPtr pScrn, int mode, int flags)
+{
+	FBDevDPMSRec dpmsinfo;
+
+	if (!DPMSCallback)
+		return;
+
+	dpmsinfo.pScrn = pScrn;
+	dpmsinfo.mode = mode;
+	dpmsinfo.flags = flags;
+
+	CallCallbacks (&DPMSCallback, (pointer) &dpmsinfo);
+}
+
 static void
 fbdevDPMSSetFunc(ScrnInfoPtr pScrn, int mode, int flags)
 {
 	FBDevPtr pFBDev = FBDEVPTR(pScrn);
+	int call_before;
+
+	call_before = (DPMSPowerLevel == DPMSModeSuspend ||
+	               DPMSPowerLevel == DPMSModeOff) ? 1 : 0;
+
+	if (call_before)
+		_dpmsCallCallback (pScrn, mode, flags);
 
 	switch(DPMSPowerLevel)
 	{
@@ -77,6 +101,9 @@ fbdevDPMSSetFunc(ScrnInfoPtr pScrn, int mode, int flags)
 	default:
 		return;
 	}
+
+	if (!call_before)
+		_dpmsCallCallback (pScrn, mode, flags);
 }
 
 xf86DPMSSetProc*

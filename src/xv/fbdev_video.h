@@ -4,7 +4,7 @@ xserver-xorg-video-emulfb
 
 Copyright 2010 - 2011 Samsung Electronics co., Ltd. All Rights Reserved.
 
-Contact: YoungHoon Jung <yhoon.jung@samsung.com>
+Contact: Boram Park <boram1288.park@samsung.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the
@@ -30,21 +30,24 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef FBDEV_VIDEO_H
 #define FBDEV_VIDEO_H
 
-typedef enum {
-		MODE_INIT,
-		MODE_V4L2,
-		MODE_VIRTUAL
-} FBDEV_PORT_MODE;
+typedef enum
+{
+	PORT_MODE_INIT,
+	PORT_MODE_V4L2,
+	PORT_MODE_WAITING
+} FBDevPortMode;
 
-/* FBDev port information structure */
-typedef struct {
+/* FBDEV port information structure */
+typedef struct
+{
 	int index;
-	FBDEV_PORT_MODE mode;
+	FBDevPortMode mode;
+	int drawing;
 	int size;
 
 	RegionRec clip;
 
-	int rotation;
+	int rotate;
 	int hflip;
 	int vflip;
 	xRectangle    dst;
@@ -54,10 +57,17 @@ typedef struct {
 
 	int   v4l2_index;
 	void *v4l2_handle;
+
+	int need_streamon;
 } FBDevPortPriv, *FBDevPortPrivPtr;
 
-extern Bool fbdevVideoInit(ScreenPtr pScreen);
-
-extern void fbdevVideoFini(ScreenPtr pScreen);
+extern Bool fbdevVideoInit (ScreenPtr pScreen);
+extern void fbdevVideoFini (ScreenPtr pScreen);
+int fbdevVideoQueryImageAttributes (ScrnInfoPtr pScrnInfo,
+                                    int            id,
+                                    unsigned short *w,
+                                    unsigned short *h,
+                                    int            *pitches,
+                                    int            *offsets);
 
 #endif // FBDEV_VIDEO_H
