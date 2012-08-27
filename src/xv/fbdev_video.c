@@ -415,6 +415,7 @@ _fbdevVideoPutImageV4l2 (ScrnInfoPtr pScrnInfo,
 		if (modeBefore == PORT_MODE_WAITING)
 			pScrnInfo->pScreen->WindowExposures ((WindowPtr) pDraw, clip_boxes, NULL);
 
+#if ENABLE_ARM
 		/* update cliplist */
 		if (!REGION_EQUAL (pScrnInfo->pScreen, &pPortPriv->clip, clip_boxes))
 		{
@@ -425,6 +426,7 @@ _fbdevVideoPutImageV4l2 (ScrnInfoPtr pScrnInfo,
 				pFBDev->bFbAlphaEnabled = TRUE;
 			}
 		}
+#endif
 
 		return Success;
 	}
@@ -642,19 +644,21 @@ FBDevVideoStop (ScrnInfoPtr pScrnInfo, pointer data, Bool exit)
 {
 	DRVLOG ("%s (%s:%d) exit(%d)\n", __FUNCTION__, __FILE__, __LINE__, exit);
 
-	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
-
 	FBDevPortPrivPtr pPortPriv = (FBDevPortPrivPtr) data;
 
 	if (pPortPriv->mode == PORT_MODE_V4L2)
 	{
+		FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
+
 		_fbdevVideoCloseV4l2Handle (pScrnInfo, pPortPriv);
 
+#if ENABLE_ARM
 		if (pFBDev->bFbAlphaEnabled)
 		{
 			fbdevFbScreenAlphaDeinit (fbdevHWGetFD (pScrnInfo));
 			pFBDev->bFbAlphaEnabled = FALSE;
 		}
+#endif
 	}
 
 	pPortPriv->mode = PORT_MODE_INIT;
