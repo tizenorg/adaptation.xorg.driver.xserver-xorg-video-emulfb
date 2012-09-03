@@ -62,10 +62,10 @@ static const OptionInfoRec * 	FBDevAvailableOptions(int chipid, int busid);
 static void	FBDevIdentify(int flags);
 static Bool	FBDevProbe(DriverPtr drv, int flags);
 static Bool	FBDevPreInit(ScrnInfoPtr pScrn, int flags);
-static Bool	FBDevScreenInit(int Index, ScreenPtr pScreen, int argc, char **argv);
-static Bool	FBDevEnterVT(int scrnIndex, int flags);
-static void	FBDevLeaveVT(int scrnIndex, int flags);
-static Bool	FBDevCloseScreen(int scrnIndex, ScreenPtr pScreen);
+static Bool	FBDevScreenInit(ScreenPtr pScreen, int argc, char **argv);
+static Bool	FBDevEnterVT(ScrnInfoPtr pScrn);
+static void	FBDevLeaveVT(ScrnInfoPtr pScrn);
+static Bool	FBDevCloseScreen(ScreenPtr pScreen);
 static void	FBDevSaveCurrent(ScrnInfoPtr pScrn);
 
 /* This DriverRec must be defined in the driver for Xserver to load this driver */
@@ -184,9 +184,9 @@ FBDevIdentify(int flags)
  * This function just verify whether the display hw is avaliable or not.
  */
 static Bool
-FBDevHWProbe(struct pci_device * pPci, char *device,char **namep)
+FBDevHWProbe(struct pci_device * pPci, const char *device,char **namep)
 {
-	return fbdevHWProbe(pPci,device,namep);
+	return fbdevHWProbe(pPci, (char *)device,namep);
 }
 
 /* The purpose of this function is to identify all instances of hardware supported
@@ -200,9 +200,11 @@ FBDevProbe(DriverPtr drv, int flags)
 	ScrnInfoPtr pScrn;
 	GDevPtr *devSections;
 	int numDevSections;
-	char *dev;
+	const char *dev;
 	int entity;
 	Bool foundScreen = FALSE;
+    const char * drv_name = "fbdev";
+    const char * module_name = "fbdevhw";
 
 	/* For now, just bail out for PROBE_DETECT. */
 	if (flags & PROBE_DETECT)
@@ -211,12 +213,12 @@ FBDevProbe(DriverPtr drv, int flags)
 	if ((numDevSections = xf86MatchDevice(FBDEV_DRIVER_NAME, &devSections)) <= 0)
 		return FALSE;
 
-	if (!xf86LoadDrvSubModule(drv, "fbdevhw"))
+	if (!xf86LoadDrvSubModule (drv, module_name))
 		return FALSE;
 
 	for (i = 0; i < numDevSections; i++)
 	{
-		dev = xf86FindOptionValue(devSections[i]->options,"fbdev");
+		dev = xf86FindOptionValue (devSections[i]->options, drv_name);
 		if (FBDevHWProbe(NULL,dev,NULL))
 		{
 			pScrn = NULL;
@@ -273,10 +275,10 @@ FBDevGetDefaultDepth(ScrnInfoPtr pScrn, int *bitsPerPixel)
  * This function just verify whether the display hw is avaliable or not.
  */
 static Bool
-FBDevHWInit(ScrnInfoPtr pScrn, struct pci_device *pPci, char *device)
+FBDevHWInit(ScrnInfoPtr pScrn, struct pci_device *pPci, const char *device)
 {
 	/* open device : open the framebuffer device */
-	if (!fbdevHWInit(pScrn, NULL, device))
+	if (!fbdevHWInit(pScrn, NULL, (char *)device))
 	{
 		return FALSE;
 	}
@@ -321,10 +323,11 @@ FBDevPreInit(ScrnInfoPtr pScrn, int flags)
 {
 	FBDevPtr pFBDev;
 	int default_depth, fbbpp;
-	char *path;
+	const char *path;
 	Gamma defualt_gamma = {0.0, 0.0, 0.0};
 	rgb default_weight = { 0, 0, 0 };
 	int flag24;
+    const char * fb_name = "fbdev";
 
 	if (flags & PROBE_DETECT) return FALSE;
 
@@ -341,7 +344,7 @@ FBDevPreInit(ScrnInfoPtr pScrn, int flags)
 	pFBDev->pEnt = xf86GetEntityInfo(pScrn->entityList[0]);
 
 	/* can set the path with fbdev option */
-	path = xf86FindOptionValue(pFBDev->pEnt->device->options, "fbdev");
+	path = xf86FindOptionValue(pFBDev->pEnt->device->options, fb_name);
 
 	/* Init HW */
 	if(!FBDevHWInit(pScrn,NULL,path))
@@ -465,9 +468,9 @@ bail1:
 }
 
 static void
-FBDevAdjustFrame(int scrnIndex, int x, int y, int flags)
+FBDevAdjustFrame(ScrnInfoPtr pScrn, int x, int y)
 {
-	fbdevHWAdjustFrame(scrnIndex,x,y,flags);
+	fbdevHWAdjustFrame(pScrn, x, y);
 }
 
 
@@ -517,7 +520,7 @@ FBDevGetFbAddr(ScrnInfoPtr pScrn)
 }
 
 static Bool
-FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
+FBDevScreenInit(ScreenPtr pScreen, int argc, char **argv)
 {
 	ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
 	FBDevPtr pFBDev = FBDEVPTR(pScrn);
@@ -527,7 +530,7 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 	pFBDev->rotate = RR_Rotate_0;
 	Bool rotated = (pFBDev->rotate & (RR_Rotate_90|RR_Rotate_270)) != 0;
 
-	xf86DrvMsg(scrnIndex,X_INFO,
+	xf86DrvMsg(pScrn->scrnIndex,X_INFO,
 	           "Infomation of Visual is \n\tbitsPerPixel=%d, depth=%d, defaultVisual=%s\n"
 	           "\tmask: %x,%x,%x, offset: %d,%d,%d\n",
 	           pScrn->bitsPerPixel,
@@ -543,7 +546,7 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 	pFBDev->fbmem = fbdevHWMapVidmem(pScrn); /* mmap memory pointer */
 	if (!pFBDev->fbmem)
 	{
-		xf86DrvMsg(scrnIndex,X_ERROR
+		xf86DrvMsg(pScrn->scrnIndex,X_ERROR
 		           ,"mapping of video memory  failed\n");
 		return FALSE;
 	}
@@ -562,13 +565,13 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 
 	if (!FBDevModeInit(pScrn, tmpMode))
 	{
-		xf86DrvMsg(scrnIndex,X_ERROR
+		xf86DrvMsg(pScrn->scrnIndex,X_ERROR
 		           ,"mode initialization failed\n");
 		return FALSE;
 	}
 
 	fbdevHWSaveScreen(pScreen, SCREEN_SAVER_ON);
-	FBDevAdjustFrame(scrnIndex,0,0,0);
+	FBDevAdjustFrame(pScrn,0,0);
 
 	FBDevSaveCurrent(pScrn);
 
@@ -576,14 +579,14 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 	miClearVisualTypes();
 	if (!miSetVisualTypes(pScrn->depth, TrueColorMask, pScrn->rgbBits, TrueColor))
 	{
-		xf86DrvMsg(scrnIndex,X_ERROR
+		xf86DrvMsg(pScrn->scrnIndex,X_ERROR
 		           ,"visual type setup failed for %d bits per pixel [1]\n"
 		           , pScrn->bitsPerPixel);
 		return FALSE;
 	}
 	if (!miSetPixmapDepths())
 	{
-		xf86DrvMsg(scrnIndex,X_ERROR
+		xf86DrvMsg(pScrn->scrnIndex,X_ERROR
 		           ,"pixmap depth setup failed\n");
 		return FALSE;
 	}
@@ -610,7 +613,7 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 
 		break;
 	default:
-		xf86DrvMsg(scrnIndex, X_ERROR
+		xf86DrvMsg(pScrn->scrnIndex, X_ERROR
 		           , "internal error: invalid number of bits per pixel (%d) encountered\n"
 		           , pScrn->bitsPerPixel);
 		break;
@@ -686,7 +689,7 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 	/* colormap */
 	if (!miCreateDefColormap(pScreen))
 	{
-		xf86DrvMsg(scrnIndex, X_ERROR
+		xf86DrvMsg(pScrn->scrnIndex, X_ERROR
 		           , "internal error: miCreateDefColormap failed \n");
 		return FALSE;
 	}
@@ -710,30 +713,24 @@ FBDevScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 
 
 static Bool
-FBDevEnterVT(int scrnIndex, int flags)
+FBDevEnterVT(ScrnInfoPtr pScrn)
 {
-
-	ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
-
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO
 	           , "EnterVT::Hardware state at EnterVT:\n");
 	return TRUE;
 }
 
 static void
-FBDevLeaveVT(int scrnIndex, int flags)
+FBDevLeaveVT(ScrnInfoPtr pScrn)
 {
-
-	ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
-
 	xf86DrvMsg(pScrn->scrnIndex, X_INFO
 	           , "LeaveVT::Hardware state at LeaveVT:\n");
 }
 
 static Bool
-FBDevCloseScreen(int scrnIndex, ScreenPtr pScreen)
+FBDevCloseScreen(ScreenPtr pScreen)
 {
-	ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+	ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
 	FBDevPtr pFBDev = FBDEVPTR(pScrn);
 
     fbdevTraceUninstallHooks ();
@@ -753,7 +750,7 @@ FBDevCloseScreen(int scrnIndex, ScreenPtr pScreen)
 	pScreen->CreateScreenResources = pFBDev->CreateScreenResources;
 	pScreen->CloseScreen = pFBDev->CloseScreen;
 
-	return (*pScreen->CloseScreen)(scrnIndex, pScreen);
+	return (*pScreen->CloseScreen)(pScreen);
 }
 
 
