@@ -33,10 +33,13 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <fourcc.h>
 
+#define B(c,s)              ((((unsigned int)(c)) & 0xff) << (s))
+#define FOURCC(a,b,c,d)     (B(d,24) | B(c,16) | B(b,8) | B(a,0))
+
 /* http://www.fourcc.org/yuv.php
  * http://en.wikipedia.org/wiki/YUV
  */
-#define FOURCC_RGB565 0x50424742
+#define FOURCC_RGB565   FOURCC('R','G','B','P')
 #define XVIMAGE_RGB565 \
    { \
     FOURCC_RGB565, \
@@ -54,7 +57,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     XvTopToBottom \
    }
 
-#define FOURCC_RGB24 0x33424752
+#define FOURCC_RGB24    FOURCC('R','G','B','3')
 #define XVIMAGE_RGB24 \
    { \
     FOURCC_RGB24, \
@@ -72,7 +75,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     XvTopToBottom \
    }
 
-#define FOURCC_RGB32 0x34424752
+#define FOURCC_RGB32    FOURCC('R','G','B','4')
 #define XVIMAGE_RGB32 \
    { \
     FOURCC_RGB32, \
@@ -90,7 +93,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     XvTopToBottom \
    }
 
-#define FOURCC_ST12 0x32315453
+#define FOURCC_ST12     FOURCC('S','T','1','2')
 #define XVIMAGE_ST12 \
    { \
     FOURCC_ST12, \
@@ -110,7 +113,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     XvTopToBottom \
    }
 
-#define FOURCC_SN12 0x32314E53
+#define FOURCC_SN12     FOURCC('S','N','1','2')
 #define XVIMAGE_SN12 \
    { \
     FOURCC_SN12, \
@@ -130,7 +133,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     XvTopToBottom \
    }
 
-#define FOURCC_NV12 0x3231564E
+#define FOURCC_NV12     FOURCC('N','V','1','2')
 #define XVIMAGE_NV12 \
    { \
     FOURCC_NV12, \
@@ -150,7 +153,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
     XvTopToBottom \
    }
 
-#define FOURCC_S420 0x30323453
+#define FOURCC_S420     FOURCC('S','4','2','0')
 #define XVIMAGE_S420 \
    { \
 	FOURCC_S420, \
@@ -169,7 +172,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 	  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}, \
 	XvTopToBottom \
    }
-#define FOURCC_SUYV 0x56595553
+#define FOURCC_SUYV     FOURCC('S','U','Y','V')
 #define XVIMAGE_SUYV \
    { \
 	FOURCC_SUYV, \
