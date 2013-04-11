@@ -62,6 +62,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <sys/ioctl.h>
 #include <linux/fb.h>
 
+#if USE_XDBG
+#include "xdbg.h"
+#endif
+
 /* prototypes */
 static const OptionInfoRec * 	FBDevAvailableOptions(int chipid, int busid);
 static void	FBDevIdentify(int flags);
@@ -712,6 +716,10 @@ FBDevScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
     /* register the event hook */
     fbdevTraceInstallHooks ();
+
+#if USE_XDBG
+    xDbgLogPListInit (pScreen);
+#endif
 
 	return TRUE;
 }

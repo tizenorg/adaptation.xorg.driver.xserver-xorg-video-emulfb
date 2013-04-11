@@ -57,6 +57,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define ADAPTOR_NUM  2
 
+#define USE_XDBG 1
+
 /* FBDev driver private data structure to hold the driver's screen-specific data */
 typedef struct {
 	unsigned char *fbstart;	/* start memory point of framebuffer: (fbmem + fboff) */

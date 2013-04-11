@@ -3,7 +3,7 @@
 
 Name:       xorg-x11-drv-emulfb
 Summary:    X.Org X server driver for sdk emulation
-Version:    0.5.6
+Version:    0.5.7
 Release:    1
 #ExclusiveArch:  %arm
 Group:      System/X Hardware Support
@@ -22,6 +22,7 @@ BuildRequires:  pkgconfig(resourceproto)
 BuildRequires:  pkgconfig(dlog)
 BuildRequires:  pkgconfig(libdrm)
 BuildRequires:  pkgconfig(pixman-1)
+BuildRequires:  pkgconfig(xdbg)
 
 %description
 This package provides the driver for sdk emulation
