@@ -552,8 +552,8 @@ FBDEVVirtualVideoSetPortAttribute (ScrnInfoPtr pScrn,
 }
 
 /* vid_w, vid_h : no meaning for us. not using.
- * dst_w, dst_h : size to hope for GetStill.
- * p_w, p_h     : real size for GetStill.
+ * dst_w, dst_h : size to hope for PutStill.
+ * p_w, p_h     : real size for PutStill.
  */
 static void
 FBDEVVirtualVideoQueryBestSize (ScrnInfoPtr pScrn,
@@ -574,7 +574,7 @@ FBDEVVirtualVideoQueryBestSize (ScrnInfoPtr pScrn,
  * Only pDraw's size is used.
  */
 static int
-FBDEVVirtualVideoGetStill (ScrnInfoPtr pScrn,
+FBDEVVirtualVideoPutStill (ScrnInfoPtr pScrn,
                            short vid_x, short vid_y, short drw_x, short drw_y,
                            short vid_w, short vid_h, short drw_w, short drw_h,
                            RegionPtr clipBoxes, pointer data, DrawablePtr pDraw )
@@ -642,7 +642,7 @@ fbdevVideoSetupVirtualVideo (ScreenPtr pScreen)
 	dummy_encoding[0].width = pScreen->width;
 	dummy_encoding[0].height = pScreen->height;
 
-	pAdaptor->type = XvWindowMask | XvPixmapMask | XvOutputMask | XvStillMask;
+	pAdaptor->type = XvWindowMask | XvPixmapMask | XvInputMask | XvStillMask;
 	pAdaptor->flags = 0;
 	pAdaptor->name = "FBDEV Virtual Video";
 	pAdaptor->nEncodings = sizeof (dummy_encoding) / sizeof (XF86VideoEncodingRec);
@@ -669,7 +669,7 @@ fbdevVideoSetupVirtualVideo (ScreenPtr pScreen)
 	pAdaptor->GetPortAttribute     = FBDEVVirtualVideoGetPortAttribute;
 	pAdaptor->SetPortAttribute     = FBDEVVirtualVideoSetPortAttribute;
 	pAdaptor->QueryBestSize        = FBDEVVirtualVideoQueryBestSize;
-	pAdaptor->GetStill             = FBDEVVirtualVideoGetStill;
+	pAdaptor->PutStill             = FBDEVVirtualVideoPutStill;
 	pAdaptor->StopVideo            = FBDEVVirtualVideoStop;
 
 	if (!_fbdevVirtualVideoRegisterEventResourceTypes ())
