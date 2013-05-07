@@ -196,6 +196,13 @@ _fbdevVideoCloseV4l2Handle (ScrnInfoPtr pScrnInfo, FBDevPortPrivPtr pPortPriv)
 
 	pPortPriv->v4l2_handle = NULL;
 	pPortPriv->v4l2_index = -1;
+
+    if (pPortPriv->aligned_buffer)
+    {
+        free (pPortPriv->aligned_buffer);
+        pPortPriv->aligned_buffer = NULL;
+        pPortPriv->aligned_width = 0;
+    }
 }
 
 static Atom
@@ -526,6 +533,42 @@ _fbdevVideoPutImageOnDrawable (ScrnInfoPtr pScrnInfo,
 		break;
 	}
 
+    if (image_info->id == FOURCC_I420 && img->width % 16)
+    {
+        int src_p[3] = {0,}, src_o[3] = {0,}, src_l[3] = {0,};
+        int dst_p[3] = {0,}, dst_o[3] = {0,}, dst_l[3] = {0,};
+        unsigned short src_w, src_h, dst_w, dst_h;
+        int size;
+
+        src_w = img->width;
+        src_h = img->height;
+        fbdevVideoQueryImageAttributes (NULL, image_info->id, &src_w, &src_h,
+                                        src_p, src_o, src_l);
+
+        dst_w = (img->width + 15) & ~15;
+        dst_h = img->height;
+        size = fbdevVideoQueryImageAttributes (NULL, image_info->id, &dst_w, &dst_h,
+                                               dst_p, dst_o, dst_l);
+
+        if (!pPortPriv->aligned_buffer)
+        {
+            pPortPriv->aligned_buffer = malloc (size);
+            if (!pPortPriv->aligned_buffer)
+                return FALSE;
+        }
+
+        fbdev_util_copy_image (src_w, src_h,
+                               (char*)buf, src_w, src_h,
+                               src_p, src_o, src_l,
+                               (char*)pPortPriv->aligned_buffer, dst_w, dst_h,
+                               dst_p, dst_o, dst_l,
+                               3, 2, 2);
+
+        pPortPriv->aligned_width = dst_w;
+        img->width = dst_w;
+        buf = pPortPriv->aligned_buffer;
+    }
+
 	/* support only RGB  */
 	fbdev_pixman_convert_image (PIXMAN_OP_SRC,
 	                            buf, pPixmap->devPrivate.ptr,
@@ -756,6 +799,13 @@ FBDevVideoStop (ScrnInfoPtr pScrnInfo, pointer data, Bool exit)
 #endif
 	}
 
+    if (pPortPriv->aligned_buffer)
+    {
+        free (pPortPriv->aligned_buffer);
+        pPortPriv->aligned_buffer = NULL;
+        pPortPriv->aligned_width = 0;
+    }
+
 	pPortPriv->mode = PORT_MODE_INIT;
 	pPortPriv->preemption = 0;
 	pPortPriv->rotate = -1;
@@ -782,7 +832,8 @@ fbdevVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
                                 unsigned short *w,
                                 unsigned short *h,
                                 int            *pitches,
-                                int            *offsets)
+                                int            *offsets,
+                                int            *lengths)
 {
 	int size = 0, tmp = 0;
 
@@ -797,18 +848,24 @@ fbdevVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
 		if (pitches)
 			pitches[0] = size;
 		size *= *h;
+        if (lengths)
+            lengths[0] = size;
 		break;
 	case FOURCC_RGB24:
 		size += (*w << 1) + *w;
 		if (pitches)
 			pitches[0] = size;
 		size *= *h;
+        if (lengths)
+            lengths[0] = size;
 		break;
 	case FOURCC_RGB32:
 		size += (*w << 2);
 		if (pitches)
 			pitches[0] = size;
 		size *= *h;
+        if (lengths)
+            lengths[0] = size;
 		break;
 	case FOURCC_I420:
 	case FOURCC_S420:
@@ -821,6 +878,8 @@ fbdevVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
 		size *= *h;
 		if (offsets)
 			offsets[1] = size;
+        if (lengths)
+            lengths[0] = size;
 
 		tmp = ((*w >> 1) + 3) & ~3;
 		if (pitches)
@@ -830,8 +889,13 @@ fbdevVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
 		size += tmp;
 		if (offsets)
 			offsets[2] = size;
+        if (lengths)
+            lengths[1] = tmp;
 
 		size += tmp;
+        if (lengths)
+            lengths[2] = tmp;
+
 		break;
 	case FOURCC_UYVY:
 	case FOURCC_SUYV:
@@ -865,6 +929,38 @@ fbdevVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
 	}
 
 	return size;
+}
+
+static int
+FBDEVVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
+                                int            id,
+                                unsigned short *w,
+                                unsigned short *h,
+                                int            *pitches,
+                                int            *offsets)
+{
+    return fbdevVideoQueryImageAttributes (pScrnInfo, id, w, h, pitches, offsets, NULL);
+}
+
+int secUtilDumpRaw (const char * file, const void * data, int size)
+{
+//	int i;
+    unsigned int * blocks;
+
+    FILE * fp = fopen (file, "w+");
+    if (fp == NULL)
+    {
+        return 0;
+    }
+    else
+    {
+        blocks = (unsigned int*)data;
+        fwrite (blocks, 1, size, fp);
+
+        fclose (fp);
+    }
+
+    return 0;
 }
 
 static int
@@ -905,6 +1001,11 @@ FBDevVideoPutImage (ScrnInfoPtr pScrnInfo,
 		            (id & 0xFF0000) >> 16,  (id & 0xFF000000) >> 24);
 		return BadRequest;
 	}
+
+  static int i;
+  char name[128];
+  sprintf (name, "/mnt/host/temp/xv_%d_%d_%d.yuv", width, height, i++);
+  secUtilDumpRaw (name, buf, ((width+3)&~3)*height*1.5);
 
 	_fbdevVideoGetRotation (pScreen, pPortPriv, pDraw, &scn_rotate, &rotate, &hw_rotate);
 
@@ -1009,7 +1110,7 @@ fbdevVideoSetupImageVideo (ScreenPtr pScreen)
 	pAdaptor->GetPortAttribute     = FBDevVideoGetPortAttribute;
 	pAdaptor->SetPortAttribute     = FBDevVideoSetPortAttribute;
 	pAdaptor->QueryBestSize        = FBDevVideoQueryBestSize;
-	pAdaptor->QueryImageAttributes = fbdevVideoQueryImageAttributes;
+	pAdaptor->QueryImageAttributes = FBDEVVideoQueryImageAttributes;
 
 	return pAdaptor;
 }

@@ -756,7 +756,7 @@ fbdevVideoV4l2StreamOff (void *handle)
 		size = fbdevVideoQueryImageAttributes (NULL, hdisp->status.id,
 		                                       (unsigned short*)&hdisp->status.img.width,
 		                                       (unsigned short*)&hdisp->status.img.height,
-		                                       NULL, NULL);
+		                                       NULL, NULL, NULL);
 
 		if (size > 0)
 			hdisp->status.backup = malloc (size);
@@ -979,7 +979,7 @@ fbdevVideoV4l2Draw (void *handle, uchar *buf, uint *phy_addrs)
 		size = fbdevVideoQueryImageAttributes (NULL, hdisp->status.id,
 		                                       (unsigned short*)&hdisp->status.img.width,
 		                                       (unsigned short*)&hdisp->status.img.height,
-		                                       NULL, NULL);
+		                                       NULL, NULL, NULL);
 		memcpy (destbuf, buf, size);
 	}
 

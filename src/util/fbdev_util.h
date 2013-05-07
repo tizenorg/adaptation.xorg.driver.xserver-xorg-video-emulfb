@@ -79,4 +79,11 @@ void fbdev_util_rotate_rect (int xres, int yres, int src_rot, int dst_rot, xRect
 const PropertyPtr fbdev_util_get_window_property(WindowPtr pWin, const char* prop_name);
 void fbdev_util_align_rect (int src_w, int src_h, int dst_w, int dst_h, xRectangle *fit, Bool hw);
 
+void* fbdev_util_copy_image (int width, int height,
+                             char *s, int s_size_w, int s_size_h,
+                             int *s_pitches, int *s_offsets, int *s_lengths,
+                             char *d, int d_size_w, int d_size_h,
+                             int *d_pitches, int *d_offsets, int *d_lengths,
+                             int channel, int h_sampling, int v_sampling);
+
 #endif  /* __FBDEV_UTIL_H__ */

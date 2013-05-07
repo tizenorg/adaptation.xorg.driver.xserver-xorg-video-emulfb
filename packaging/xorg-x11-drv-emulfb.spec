@@ -3,7 +3,7 @@
 
 Name:       xorg-x11-drv-emulfb
 Summary:    X.Org X server driver for sdk emulation
-Version:    0.5.7
+Version:    0.5.8
 Release:    1
 #ExclusiveArch:  %arm
 Group:      System/X Hardware Support

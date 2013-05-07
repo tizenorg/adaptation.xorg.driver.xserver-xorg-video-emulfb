@@ -240,6 +240,62 @@ fbdev_util_align_rect (int src_w, int src_h, int dst_w, int dst_h, xRectangle *f
 	fit->height = fit_height;
 }
 
+static void *
+_copy_one_channel (int width, int height,
+                   char *s, int s_size_w, int s_pitches,
+                   char *d, int d_size_w, int d_pitches)
+{
+    unsigned char *src = (unsigned char*)s;
+    unsigned char *dst = (unsigned char*)d;
+
+    if (d_size_w == width && s_size_w == width)
+        memcpy (dst, src, width * height);
+    else
+    {
+        int i;
+
+        for (i = 0; i < height; i++)
+        {
+            memcpy (dst, src, width);
+            src += s_pitches;
+            dst += d_pitches;
+        }
+    }
+
+    return dst;
+}
+
+void*
+fbdev_util_copy_image (int width, int height,
+                       char *s, int s_size_w, int s_size_h,
+                       int *s_pitches, int *s_offsets, int *s_lengths,
+                       char *d, int d_size_w, int d_size_h,
+                       int *d_pitches, int *d_offsets, int *d_lengths,
+                       int channel, int h_sampling, int v_sampling)
+{
+    int i;
+
+    for (i = 0; i < channel; i++)
+    {
+        int c_width = width;
+        int c_height = height;
+
+        if (i > 0)
+        {
+            c_width = c_width / h_sampling;
+            c_height = c_height / v_sampling;
+        }
+
+        _copy_one_channel (c_width, c_height,
+                           s, s_size_w, s_pitches[i],
+                           d, d_size_w, d_pitches[i]);
+
+        s = s + s_lengths[i];
+        d = d + d_lengths[i];
+    }
+
+    return d;
+}
 
 void
 drvlog (const char * f, ...)

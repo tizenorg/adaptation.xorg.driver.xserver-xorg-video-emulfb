@@ -58,6 +58,9 @@ typedef struct
 	int   v4l2_index;
 	void *v4l2_handle;
 
+    void *aligned_buffer;
+    int   aligned_width;
+
 	int need_streamon;
 } FBDevPortPriv, *FBDevPortPrivPtr;
 
@@ -68,7 +71,8 @@ int fbdevVideoQueryImageAttributes (ScrnInfoPtr pScrnInfo,
                                     unsigned short *w,
                                     unsigned short *h,
                                     int            *pitches,
-                                    int            *offsets);
+                                    int            *offsets,
+                                    int            *lengths);
 
 void fbdevVideoSetOffset (ScrnInfoPtr pScrnInfo, int x, int y);
 void fbdevVideoGetV4l2Handles (ScrnInfoPtr pScrnInfo, void ***handles, int *cnt);

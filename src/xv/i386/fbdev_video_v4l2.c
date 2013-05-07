@@ -105,6 +105,9 @@ typedef struct
 	int offset_y;
 
 	int re_setting;
+
+    void *aligned_buffer;
+    int   aligned_width;
 } FBDevDispHandle;
 
 enum
@@ -397,6 +400,13 @@ _fbdevVideoV4l2CloseDevice (FBDevDispHandle *hdisp)
 		hdisp->video_fd = -1;
 	}
 
+    if (hdisp->aligned_buffer)
+    {
+        free (hdisp->aligned_buffer);
+        hdisp->aligned_buffer = NULL;
+        hdisp->aligned_width = 0;
+    }
+
 	device_infos[hdisp->index].bOpened = FALSE;
 }
 
@@ -502,7 +512,7 @@ fbdevVideoV4l2StreamOn (void *handle)
 		size = fbdevVideoQueryImageAttributes (NULL, FOURCC_RGB32,
 		                                       (unsigned short*)&hdisp->status.dst.width,
 		                                       (unsigned short*)&hdisp->status.dst.height,
-		                                       NULL, NULL);
+		                                       NULL, NULL, NULL);
 
 		memcpy (hdisp->dst_buf[0].buf, hdisp->status.backup, size);
 
@@ -537,7 +547,7 @@ fbdevVideoV4l2StreamOff (void *handle)
 		size = fbdevVideoQueryImageAttributes (NULL, FOURCC_RGB32,
 		                                       (unsigned short*)&hdisp->status.dst.width,
 		                                       (unsigned short*)&hdisp->status.dst.height,
-		                                       NULL, NULL);
+		                                       NULL, NULL, NULL);
 
 		if (size > 0)
 			hdisp->status.backup = malloc (size);
@@ -735,6 +745,42 @@ fbdevVideoV4l2Draw (void *handle, uchar *buf, uint *phy_addrs)
 		dst_format = PIXMAN_x8r8g8b8;
 		break;
 	}
+
+    if (src_format == PIXMAN_yv12 && img.width % 16)
+    {
+        int src_p[3] = {0,}, src_o[3] = {0,}, src_l[3] = {0,};
+        int dst_p[3] = {0,}, dst_o[3] = {0,}, dst_l[3] = {0,};
+        unsigned short src_w, src_h, dst_w, dst_h;
+        int size;
+
+        src_w = img.width;
+        src_h = img.height;
+        fbdevVideoQueryImageAttributes (NULL, FOURCC_I420, &src_w, &src_h,
+                                        src_p, src_o, src_l);
+
+        dst_w = (img.width + 15) & ~15;
+        dst_h = img.height;
+        size = fbdevVideoQueryImageAttributes (NULL, FOURCC_I420, &dst_w, &dst_h,
+                                               dst_p, dst_o, dst_l);
+
+        if (!hdisp->aligned_buffer)
+        {
+            hdisp->aligned_buffer = malloc (size);
+            if (!hdisp->aligned_buffer)
+                return FALSE;
+        }
+
+        fbdev_util_copy_image (src_w, src_h,
+                               (char*)buf, src_w, src_h,
+                               src_p, src_o, src_l,
+                               (char*)hdisp->aligned_buffer, dst_w, dst_h,
+                               dst_p, dst_o, dst_l,
+                               3, 2, 2);
+
+        hdisp->aligned_width = dst_w;
+        img.width = dst_w;
+        buf = hdisp->aligned_buffer;
+    }
 
 	/* support only RGB  */
 	fbdev_pixman_convert_image (PIXMAN_OP_SRC,
