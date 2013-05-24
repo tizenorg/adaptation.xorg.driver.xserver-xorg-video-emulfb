@@ -187,6 +187,14 @@ _fbdevVideoCloseV4l2Handle (ScrnInfoPtr pScrnInfo, FBDevPortPrivPtr pPortPriv)
 {
 	FBDevPtr pFBDev = (FBDevPtr) pScrnInfo->driverPrivate;
 
+    if (pPortPriv->aligned_buffer)
+    {
+        free (pPortPriv->aligned_buffer);
+        pPortPriv->aligned_buffer = NULL;
+        pPortPriv->buffer_size = 0;
+        pPortPriv->aligned_width = 0;
+    }
+
 	if (!pPortPriv->v4l2_handle)
 		return;
 
@@ -196,13 +204,6 @@ _fbdevVideoCloseV4l2Handle (ScrnInfoPtr pScrnInfo, FBDevPortPrivPtr pPortPriv)
 
 	pPortPriv->v4l2_handle = NULL;
 	pPortPriv->v4l2_index = -1;
-
-    if (pPortPriv->aligned_buffer)
-    {
-        free (pPortPriv->aligned_buffer);
-        pPortPriv->aligned_buffer = NULL;
-        pPortPriv->aligned_width = 0;
-    }
 }
 
 static Atom
@@ -550,11 +551,15 @@ _fbdevVideoPutImageOnDrawable (ScrnInfoPtr pScrnInfo,
         size = fbdevVideoQueryImageAttributes (NULL, image_info->id, &dst_w, &dst_h,
                                                dst_p, dst_o, dst_l);
 
-        if (!pPortPriv->aligned_buffer)
+        if (!pPortPriv->aligned_buffer || pPortPriv->buffer_size != size)
         {
+            if (pPortPriv->aligned_buffer)
+                free (pPortPriv->aligned_buffer);
+
             pPortPriv->aligned_buffer = malloc (size);
             if (!pPortPriv->aligned_buffer)
                 return FALSE;
+            pPortPriv->buffer_size = size;
         }
 
         fbdev_util_copy_image (src_w, src_h,
@@ -803,6 +808,7 @@ FBDevVideoStop (ScrnInfoPtr pScrnInfo, pointer data, Bool exit)
     {
         free (pPortPriv->aligned_buffer);
         pPortPriv->aligned_buffer = NULL;
+        pPortPriv->buffer_size = 0;
         pPortPriv->aligned_width = 0;
     }
 
@@ -942,27 +948,6 @@ FBDEVVideoQueryImageAttributes (ScrnInfoPtr    pScrnInfo,
     return fbdevVideoQueryImageAttributes (pScrnInfo, id, w, h, pitches, offsets, NULL);
 }
 
-int secUtilDumpRaw (const char * file, const void * data, int size)
-{
-//	int i;
-    unsigned int * blocks;
-
-    FILE * fp = fopen (file, "w+");
-    if (fp == NULL)
-    {
-        return 0;
-    }
-    else
-    {
-        blocks = (unsigned int*)data;
-        fwrite (blocks, 1, size, fp);
-
-        fclose (fp);
-    }
-
-    return 0;
-}
-
 static int
 FBDevVideoPutImage (ScrnInfoPtr pScrnInfo,
                     short src_x, short src_y, short dst_x, short dst_y,
@@ -1001,11 +986,6 @@ FBDevVideoPutImage (ScrnInfoPtr pScrnInfo,
 		            (id & 0xFF0000) >> 16,  (id & 0xFF000000) >> 24);
 		return BadRequest;
 	}
-
-  static int i;
-  char name[128];
-  sprintf (name, "/mnt/host/temp/xv_%d_%d_%d.yuv", width, height, i++);
-  secUtilDumpRaw (name, buf, ((width+3)&~3)*height*1.5);
 
 	_fbdevVideoGetRotation (pScreen, pPortPriv, pDraw, &scn_rotate, &rotate, &hw_rotate);
 

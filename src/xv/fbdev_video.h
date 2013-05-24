@@ -59,6 +59,7 @@ typedef struct
 	void *v4l2_handle;
 
     void *aligned_buffer;
+    int   buffer_size;
     int   aligned_width;
 
 	int need_streamon;

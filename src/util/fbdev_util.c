@@ -249,14 +249,14 @@ _copy_one_channel (int width, int height,
     unsigned char *dst = (unsigned char*)d;
 
     if (d_size_w == width && s_size_w == width)
-        memcpy (dst, src, width * height);
+        memcpy (dst, src, s_pitches * height);
     else
     {
         int i;
 
         for (i = 0; i < height; i++)
         {
-            memcpy (dst, src, width);
+            memcpy (dst, src, s_pitches);
             src += s_pitches;
             dst += d_pitches;
         }
