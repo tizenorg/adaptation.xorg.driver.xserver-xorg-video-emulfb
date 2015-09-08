@@ -3,11 +3,11 @@
 
 Name:       xorg-x11-drv-emulfb
 Summary:    X.Org X server driver for sdk emulation
-Version:    0.5.0
-Release:    16
+Version:    0.5.10
+Release:    1
 #ExclusiveArch:  %arm
 Group:      System/X Hardware Support
-License:    Samsung
+License:    MIT
 Source0:    %{name}-%{version}.tar.gz
 
 BuildRequires:  prelink
@@ -22,6 +22,7 @@ BuildRequires:  pkgconfig(resourceproto)
 BuildRequires:  pkgconfig(dlog)
 BuildRequires:  pkgconfig(libdrm)
 BuildRequires:  pkgconfig(pixman-1)
+BuildRequires:  pkgconfig(xdbg)
 
 %description
 This package provides the driver for sdk emulation
@@ -43,7 +44,7 @@ This package provides the driver for sdk emulation
 %endif
 
 %reconfigure --disable-static %{ENABLE_ARM} \
-    CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS} -Wl,--hash-style=both -Wl,--as-needed"
+    CFLAGS="-Wall -Werror ${CFLAGS}" LDFLAGS="${LDFLAGS} -Wl,--hash-style=both -Wl,--as-needed"
 
 make %{?jobs:-j%jobs}
 
@@ -53,15 +54,18 @@ make %{?jobs:-j%jobs}
 rm -rf %{buildroot}
 # >> install pre
 # << install pre
+mkdir -p %{buildroot}/usr/share/license
+cp -af COPYING %{buildroot}/usr/share/license/%{name}
 %make_install
 
 # >> install post
-execstack -c %{buildroot}%{_libdir}/xorg/modules/drivers/emulfb_drv.so
+#execstack -c %{buildroot}%{_libdir}/xorg/modules/drivers/emulfb_drv.so
 # << install post
 
 %files
 %defattr(-,root,root,-)
 # >> files emulfb
-%{_libdir}/xorg/modules/drivers/*.so
+#%{_libdir}/xorg/modules/drivers/*.so
 %{_datadir}/man/man4/*
 # << files emulfb
+/usr/share/license/%{name}
