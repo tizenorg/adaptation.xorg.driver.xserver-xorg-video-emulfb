@@ -3,7 +3,7 @@
 
 Name:       xorg-x11-drv-emulfb
 Summary:    X.Org X server driver for sdk emulation
-Version:    0.5.10
+Version:    0.5.9
 Release:    1
 #ExclusiveArch:  %arm
 Group:      System/X Hardware Support
@@ -44,7 +44,7 @@ This package provides the driver for sdk emulation
 %endif
 
 %reconfigure --disable-static %{ENABLE_ARM} \
-    CFLAGS="-Wall -Werror ${CFLAGS}" LDFLAGS="${LDFLAGS} -Wl,--hash-style=both -Wl,--as-needed"
+    CFLAGS="-Wall ${CFLAGS}" LDFLAGS="${LDFLAGS} -Wl,--hash-style=both -Wl,--as-needed"
 
 make %{?jobs:-j%jobs}
 
